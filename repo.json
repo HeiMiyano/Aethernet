@@ -17,9 +17,9 @@
   ],
   "RepoUrl": "https://github.com/HeiMiyano/Aethernet",
   "IconUrl": "",
-  "DownloadLinkInstall": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.2/latest.zip",
-  "DownloadLinkUpdate": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.2/latest.zip",
-  "DownloadLinkTesting": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.2/latest.zip",
+  "DownloadLinkInstall": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.3/latest.zip",
+  "DownloadLinkUpdate": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.3/latest.zip",
+  "DownloadLinkTesting": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.3/latest.zip",
   "DalamudApiLevel": 15,
   "IsHide": false,
   "IsTestingExclusive": false
