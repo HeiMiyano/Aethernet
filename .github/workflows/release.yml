@@ -62,13 +62,23 @@ jobs:
       - name: Package into Dalamud-installable zip
         shell: pwsh
         run: |
-          # Dalamud expects a flat zip containing the plugin DLL, its dependencies, and
-          # the *.json manifest, all at the root. The build output already has the right
-          # layout — we just need to zip it up under the InternalName.
+          # Dalamud expects the manifest inside the zip to be named "<InternalName>.json"
+          # and the entry-point DLL to be "<InternalName>.dll". Our project is named
+          # "Aethernet.Plugin" but InternalName is "Aethernet", so we rename both during
+          # packaging. PDB and any *.Plugin.* sidecars get the same treatment for consistency.
           $buildDir = "src/Aethernet.Plugin/bin/Release"
           $stage    = "$env:RUNNER_TEMP/Aethernet"
           New-Item -ItemType Directory -Force $stage | Out-Null
           Copy-Item -Path "$buildDir/*" -Destination $stage -Recurse -Force
+
+          # Rename the Aethernet.Plugin.* files to Aethernet.* so the zip matches the
+          # InternalName convention Dalamud's LocalPluginManifest.Load expects.
+          Get-ChildItem -Path $stage -File -Filter "Aethernet.Plugin.*" | ForEach-Object {
+              $newName = $_.Name -replace '^Aethernet\.Plugin', 'Aethernet'
+              Rename-Item -Path $_.FullName -NewName $newName -Force
+              Write-Host "renamed $($_.Name) -> $newName"
+          }
+
           Compress-Archive -Path "$stage/*" -DestinationPath "$env:RUNNER_TEMP/latest.zip" -Force
           echo "Wrote $env:RUNNER_TEMP/latest.zip"
           Get-Item "$env:RUNNER_TEMP/latest.zip" | Select-Object FullName, Length
