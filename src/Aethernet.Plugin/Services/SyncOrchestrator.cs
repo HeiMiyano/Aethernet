@@ -106,15 +106,31 @@ public sealed class SyncOrchestrator : IDisposable
         {
             // ALC unloading — bail silently. See PeriodicTickLoop note.
         }
+        catch (Microsoft.AspNetCore.SignalR.HubException hubEx) when (hubEx.Message.Contains("rate_limited"))
+        {
+            // Server-side rate limit — we're pushing too fast. Back off so the next periodic tick
+            // skips its scheduled push, giving the bucket time to refill. Log as warning instead of
+            // error so it doesn't dominate the log when the user is rapidly editing Glamourer.
+            _rateLimitedUntil = DateTime.UtcNow.AddSeconds(_config.RateLimitBackoffSec > 0 ? _config.RateLimitBackoffSec : 10);
+            _log.LogWarning("hub rate-limited; backing off until {Until:HH:mm:ss}", _rateLimitedUntil);
+        }
         catch (Exception ex) { _log.LogError(ex, "sync push failed"); }
         finally { _looping = false; }
     }
+
+    private DateTime _rateLimitedUntil = DateTime.MinValue;
 
     private async Task PushOnceAsync(CancellationToken ct)
     {
         if (_hub.State != Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected)
         {
             _log.LogInformation("push skipped: hub state = {State}", _hub.State);
+            return;
+        }
+        if (DateTime.UtcNow < _rateLimitedUntil)
+        {
+            _log.LogInformation("push skipped: in rate-limit backoff for {Secs:F1}s more",
+                (_rateLimitedUntil - DateTime.UtcNow).TotalSeconds);
             return;
         }
         if (_zone.ShouldPauseSyncing)

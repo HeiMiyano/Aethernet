@@ -28,11 +28,15 @@ public sealed class AethernetConfig : IPluginConfiguration
     public bool   ShowDownloadProgressBars { get; set; } = true;
     public int    MaxParallelDownloads     { get; set; } = 4;
     public int    MaxParallelUploads       { get; set; } = 2;
-    public int    DataPushDebounceMs       { get; set; } = 250;
+    /// <summary>How long to wait after a Glamourer/Penumbra change before pushing. Higher values
+    /// coalesce rapid edits (sliders, gear swaps) into a single push and reduce hub rate-limit hits.</summary>
+    public int    DataPushDebounceMs       { get; set; } = 1500;
     /// <summary>Safety-net interval (seconds) for re-collecting and pushing character data. The hash check skips no-op pushes, so this is cheap. Set to 0 to disable.</summary>
     public int    PeriodicSyncIntervalSec  { get; set; } = 30;
     /// <summary>Enumerate every file in every enabled mod (captures animations/VFX/sounds that aren't currently loaded). Can be heavy on disks with multi-GB mod folders — disable if it causes hitching or crashes. Hash cache keeps recurring scans cheap once primed.</summary>
     public bool   EnableModFileEnumeration { get; set; } = true;
+    /// <summary>How long to silence push attempts after the hub returns rate_limited. Server's bucket refills during this window.</summary>
+    public int    RateLimitBackoffSec      { get; set; } = 10;
 
     // ---- file cache ----
     public string FileCacheDirectory       { get; set; } = "";  // resolved at runtime under %AppData%\Aethernet

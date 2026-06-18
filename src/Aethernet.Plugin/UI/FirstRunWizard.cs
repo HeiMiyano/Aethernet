@@ -122,13 +122,35 @@ public sealed class FirstRunWizard : Window
     private void DrawPairing()
     {
         ImGui.TextWrapped("Optional: add your first pair now. You'll need a friend's UID.");
+
+        // The hub may still be connecting if the user blew through Register → Next quickly.
+        // Surface the state and gate the button so we don't throw "notconnected" mid-draw.
+        var hubState = _hub.State;
+        var connected = hubState == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected;
+        if (!connected)
+        {
+            ImGui.TextColored(new Vector4(0.95f, 0.7f, 0.3f, 1f),
+                $"Hub: {hubState} — wait a moment for the connection to come up, or skip this step.");
+        }
+
         ImGui.InputTextWithHint("##first_pair", "u-…", ref _firstPairUid, 32);
+
+        if (!connected) ImGui.BeginDisabled();
         if (ImGui.Button("Add pair") && !string.IsNullOrWhiteSpace(_firstPairUid))
         {
-            _ = _hub.InvokeAsync(HubMethods.Server.UserAddPair, new UserDto(_firstPairUid.Trim()));
-            _firstPairUid = string.Empty;
-            _statusLine = "Sent. They need to add you back for the pair to become active.";
+            try
+            {
+                _ = _hub.InvokeAsync(HubMethods.Server.UserAddPair, new UserDto(_firstPairUid.Trim()));
+                _firstPairUid = string.Empty;
+                _statusLine = "Sent. They need to add you back for the pair to become active.";
+            }
+            catch (Exception ex)
+            {
+                _statusLine = $"Failed: {ex.Message}";
+            }
         }
+        if (!connected) ImGui.EndDisabled();
+
         if (!string.IsNullOrEmpty(_statusLine))
             ImGui.TextDisabled(_statusLine);
         BottomBar(nextEnabled: true);

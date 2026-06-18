@@ -124,15 +124,34 @@ public sealed class FileTransferService : IDisposable
         var todo = hashes.Where(h => !_cache.Has(h)).ToList();
         if (todo.Count == 0) return;
 
-        // Seed per-UID progress. Total bytes is initially unknown (HEAD per file would double
-        // round-trips); we update Total as each download's Content-Length comes in.
+        // Ask the server up-front for sizes of every blob we're about to fetch. The server already
+        // has SizeBytes in its FileCache table — one round-trip vs. N HEADs. Lets the progress UI
+        // show real total-bytes from the first frame instead of growing as each file's response
+        // headers arrive. Missing/forbidden entries return no size; we fall back to per-file
+        // Content-Length for those (shouldn't happen in normal flow but be defensive).
+        Dictionary<string, long> knownSizes = new(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var ack = await WhichAreMissingAsync(todo, ct);
+            if (ack.Sizes is not null)
+                foreach (var (h, s) in ack.Sizes) knownSizes[h] = s;
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning("WhichAreMissingAsync (for sizes) failed, falling back to per-file size discovery: {Msg}", ex.Message);
+        }
+        var seedTotal = knownSizes.Values.Sum();
+
+        // Seed per-UID progress with the pre-computed total. If two batches overlap, FilesTotal
+        // and BytesTotal accumulate (don't reset).
         if (ownerUid is not null)
         {
             _perUid.AddOrUpdate(ownerUid,
-                _ => new UidDownloadProgress { FilesTotal = todo.Count, FilesDone = 0, BytesDone = 0, BytesTotal = 0 },
+                _ => new UidDownloadProgress { FilesTotal = todo.Count, FilesDone = 0, BytesDone = 0, BytesTotal = seedTotal },
                 (_, existing) =>
                 {
                     existing.FilesTotal += todo.Count;
+                    Interlocked.Add(ref existing.BytesTotal, seedTotal);
                     return existing;
                 });
             UidDownloadChanged?.Invoke(ownerUid);
@@ -142,7 +161,10 @@ public sealed class FileTransferService : IDisposable
         var tasks = todo.Select(async hash =>
         {
             await sem.WaitAsync(ct);
-            try { await DownloadOneAsync(hash, ownerUid, ct); }
+            // If we already have the size from /files/has, pass it so DownloadOneAsync skips the
+            // "add Content-Length to BytesTotal" step (otherwise we'd double-count).
+            knownSizes.TryGetValue(hash, out var preSize);
+            try { await DownloadOneAsync(hash, ownerUid, sizeAlreadySeeded: preSize > 0, ct); }
             finally { sem.Release(); }
         });
         try { await Task.WhenAll(tasks); }
@@ -158,7 +180,7 @@ public sealed class FileTransferService : IDisposable
         }
     }
 
-    private async Task DownloadOneAsync(string hash, string? ownerUid, CancellationToken ct)
+    private async Task DownloadOneAsync(string hash, string? ownerUid, bool sizeAlreadySeeded, CancellationToken ct)
     {
         var p = _active[hash] = new TransferProgress(hash, TransferKind.Download, 0);
         try
@@ -169,7 +191,9 @@ public sealed class FileTransferService : IDisposable
             using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
             resp.EnsureSuccessStatusCode();
             p.TotalBytes = resp.Content.Headers.ContentLength ?? 0;
-            if (ownerUid is not null && _perUid.TryGetValue(ownerUid, out var seedProg))
+            // Only add to per-UID BytesTotal when we DIDN'T already seed it from /files/has.
+            // Otherwise the size would be counted twice (once from seed, once from response header).
+            if (!sizeAlreadySeeded && ownerUid is not null && _perUid.TryGetValue(ownerUid, out var seedProg))
             {
                 Interlocked.Add(ref seedProg.BytesTotal, p.TotalBytes);
                 UidDownloadChanged?.Invoke(ownerUid);
