@@ -113,7 +113,12 @@ jobs:
             IsHide              = $false
             IsTestingExclusive  = $false
           }
-          $repoJson = @($repoEntry) | ConvertTo-Json -Depth 10
+          # PowerShell's ConvertTo-Json flattens single-element arrays to a bare object —
+          # "{...}" instead of "[{...}]". Dalamud's deserializer requires an array (it's a
+          # List<RemotePluginManifest>). Wrap the JSON string with brackets manually so the
+          # output is always an array regardless of how many plugins the repo serves.
+          $inner = $repoEntry | ConvertTo-Json -Depth 10
+          $repoJson = "[`n$inner`n]"
           Set-Content -Path "repo.json" -Value $repoJson -Encoding utf8
           Get-Content "repo.json"
 

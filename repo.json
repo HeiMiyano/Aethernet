@@ -11,9 +11,9 @@
     "Tags": ["mods", "penumbra", "glamourer", "mare", "sync"],
     "RepoUrl": "",
     "IconUrl": "",
-    "DownloadLinkInstall": "https://github.com/REPLACE_OWNER/REPLACE_REPO/releases/latest/download/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/REPLACE_OWNER/REPLACE_REPO/releases/latest/download/latest.zip",
-    "DownloadLinkTesting": "https://github.com/REPLACE_OWNER/REPLACE_REPO/releases/latest/download/latest.zip",
+    "DownloadLinkInstall": "https://github.com/HeiMiyano/Aethernet/releases/latest/download/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/HeiMiyano/Aethernet/releases/latest/download/latest.zip",
+    "DownloadLinkTesting": "https://github.com/HeiMiyano/Aethernet/releases/latest/download/latest.zip",
     "DalamudApiLevel": 15,
     "IsHide": false,
     "IsTestingExclusive": false
