@@ -1,21 +1,25 @@
-[
-  {
-    "Author": "Aethernet contributors",
-    "Name": "Aethernet",
-    "InternalName": "Aethernet",
-    "AssemblyVersion": "0.1.0.0",
-    "TestingAssemblyVersion": "0.1.0.0",
-    "Description": "Synchronize Penumbra mods, Glamourer state, Customize+, Honorific, SimpleHeels, Moodles and Pet Names between paired players. A clean-room replacement for Mare Synchronos.",
-    "Punchline": "Mod synchronization, rebuilt.",
-    "ApplicableVersion": "any",
-    "Tags": ["mods", "penumbra", "glamourer", "mare", "sync"],
-    "RepoUrl": "",
-    "IconUrl": "",
-    "DownloadLinkInstall": "https://github.com/REPLACE_OWNER/REPLACE_REPO/releases/latest/download/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/REPLACE_OWNER/REPLACE_REPO/releases/latest/download/latest.zip",
-    "DownloadLinkTesting": "https://github.com/REPLACE_OWNER/REPLACE_REPO/releases/latest/download/latest.zip",
-    "DalamudApiLevel": 15,
-    "IsHide": false,
-    "IsTestingExclusive": false
-  }
-]
+{
+  "Author": "Aethernet contributors",
+  "Name": "Aethernet",
+  "InternalName": "Aethernet",
+  "AssemblyVersion": "0.1.0.0",
+  "TestingAssemblyVersion": "0.1.0.0",
+  "Description": "Synchronize Penumbra mods, Glamourer state, Customize+, Honorific, SimpleHeels, Moodles and Pet Names between paired players. A clean-room replacement for Mare Synchronos.",
+  "Punchline": "Mod synchronization, rebuilt.",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "mods",
+    "penumbra",
+    "glamourer",
+    "mare",
+    "sync"
+  ],
+  "RepoUrl": "https://github.com/HeiMiyano/Aethernet",
+  "IconUrl": "",
+  "DownloadLinkInstall": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.0/latest.zip",
+  "DownloadLinkUpdate": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.0/latest.zip",
+  "DownloadLinkTesting": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.0/latest.zip",
+  "DalamudApiLevel": 15,
+  "IsHide": false,
+  "IsTestingExclusive": false
+}
