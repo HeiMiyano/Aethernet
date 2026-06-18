@@ -24,12 +24,17 @@ public sealed class FileService : IFileService
     {
         var known = await _db.FileCache.AsNoTracking()
             .Where(f => hashes.Contains(f.Hash))
-            .Select(f => new { f.Hash, f.IsForbidden })
+            .Select(f => new { f.Hash, f.IsForbidden, f.SizeBytes })
             .ToListAsync(ct);
-        var knownSet = known.Where(k => !k.IsForbidden).Select(k => k.Hash).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var knownNonForbidden = known.Where(k => !k.IsForbidden).ToList();
+        var knownSet = knownNonForbidden.Select(k => k.Hash).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var forbidden = known.Where(k => k.IsForbidden).Select(k => k.Hash).ToList();
         var missing = hashes.Where(h => !knownSet.Contains(h) && !forbidden.Contains(h, StringComparer.OrdinalIgnoreCase)).ToList();
-        return new HasFilesResponseDto(missing, forbidden);
+
+        // Sizes lets the client pre-compute total download bytes for the progress UI without
+        // needing per-file HEAD requests. Only present for hashes the server actually has.
+        var sizes = knownNonForbidden.ToDictionary(k => k.Hash, k => k.SizeBytes, StringComparer.OrdinalIgnoreCase);
+        return new HasFilesResponseDto(missing, forbidden, sizes);
     }
 
     public Task<FileUploadAckDto> UploadAsync(
