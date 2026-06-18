@@ -1,0 +1,113 @@
+name: aethernet-prod
+
+# Single-host production stack. Six containers on one Docker network behind Caddy.
+# Designed for a t4g.small EC2 (2 vCPU ARM, 2 GB RAM). Scales vertically; if you outgrow
+# this box, the cleanest migration is to lift postgres → RDS and the three .NET services
+# to ECS Fargate. The shape of this file maps 1:1 to docs/DEPLOY.md.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     aethernet
+      POSTGRES_DB:       aethernet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aethernet"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+
+  auth:
+    build:
+      context: ..
+      dockerfile: src/Aethernet.AuthService/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: "Host=postgres;Database=aethernet;Username=aethernet;Password=${POSTGRES_PASSWORD}"
+      Jwt__SigningKey:    ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY must be set in .env}
+      Jwt__Issuer:        ${JWT_ISSUER:-aethernet-auth}
+      Jwt__Audience:      ${JWT_AUDIENCE:-aethernet-hub}
+      # Optional: leave blank to disable Discord OAuth.
+      Discord__ClientId:     ${DISCORD_CLIENT_ID:-}
+      Discord__ClientSecret: ${DISCORD_CLIENT_SECRET:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  hub:
+    build:
+      context: ..
+      dockerfile: src/Aethernet.Server/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: "Host=postgres;Database=aethernet;Username=aethernet;Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__Redis:   "redis:6379"
+      Jwt__SigningKey: ${JWT_SIGNING_KEY}
+      Jwt__Issuer:     ${JWT_ISSUER:-aethernet-auth}
+      Jwt__Audience:   ${JWT_AUDIENCE:-aethernet-hub}
+      Motd:            ${MOTD:-Welcome to Aethernet.}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_started }
+
+  files:
+    build:
+      context: ..
+      dockerfile: src/Aethernet.FileServer/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: "Host=postgres;Database=aethernet;Username=aethernet;Password=${POSTGRES_PASSWORD}"
+      Jwt__SigningKey: ${JWT_SIGNING_KEY}
+      Jwt__Issuer:     ${JWT_ISSUER:-aethernet-auth}
+      Jwt__Audience:   ${JWT_AUDIENCE:-aethernet-hub}
+      # Real S3, not MinIO. AWS SDK picks up credentials from the EC2 instance role
+      # (recommended) or from these env vars (set in .env if you're not using a role).
+      Storage__Mode:     s3
+      Storage__Region:   ${AWS_REGION:-us-east-1}
+      Storage__Bucket:   ${S3_BUCKET:?S3_BUCKET must be set in .env}
+      Storage__Endpoint: ""  # blank = use AWS S3 endpoints
+      Storage__AccessKey: ${AWS_ACCESS_KEY_ID:-}
+      Storage__SecretKey: ${AWS_SECRET_ACCESS_KEY:-}
+      Storage__DefaultQuotaBytes: ${FILE_QUOTA_BYTES:-5368709120}  # 5 GB per user
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    environment:
+      DOMAIN_AUTH:  ${DOMAIN_AUTH:?DOMAIN_AUTH must be set in .env}
+      DOMAIN_HUB:   ${DOMAIN_HUB:?DOMAIN_HUB must be set in .env}
+      DOMAIN_FILES: ${DOMAIN_FILES:?DOMAIN_FILES must be set in .env}
+      ACME_EMAIL:   ${ACME_EMAIL:?ACME_EMAIL must be set in .env (Let's Encrypt notifications)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data         # certs, ACME state
+      - caddy-config:/config
+    depends_on:
+      auth:  { condition: service_started }
+      hub:   { condition: service_started }
+      files: { condition: service_started }
+
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:

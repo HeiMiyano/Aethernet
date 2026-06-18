@@ -1,0 +1,62 @@
+# Caddyfile — three reverse-proxy blocks, one per Aethernet service.
+# Caddy fetches and renews Let's Encrypt certs automatically as long as
+# DNS for each subdomain resolves to this host on port 80/443.
+
+{
+    email {$ACME_EMAIL}
+    # Uncomment the next line during initial testing to avoid rate-limiting yourself
+    # against Let's Encrypt's production CA; switch back to prod once everything works.
+    # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# ---- Auth service ----
+{$DOMAIN_AUTH} {
+    encode zstd gzip
+    reverse_proxy auth:8080
+    log {
+        output stdout
+        format console
+    }
+}
+
+# ---- SignalR hub ----
+# SignalR uses WebSockets and long-polling fallbacks. Caddy proxies WebSockets
+# transparently; the timeouts below stop idle connections from being killed mid-session.
+{$DOMAIN_HUB} {
+    encode zstd gzip
+    reverse_proxy hub:8080 {
+        transport http {
+            read_timeout  10m
+            write_timeout 10m
+        }
+        # Pass through Host, scheme, and client IP — SignalR uses these to build
+        # the WebSocket negotiate response correctly.
+        header_up Host              {host}
+        header_up X-Real-IP         {remote_host}
+        header_up X-Forwarded-For   {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+    log {
+        output stdout
+        format console
+    }
+}
+
+# ---- File server ----
+# Mod blobs go through here. Cache GETs aggressively since hashes are content-addressed
+# and immutable. Increase the body-size limit to allow large uploads.
+{$DOMAIN_FILES} {
+    encode zstd gzip
+    @get_blob method GET
+    header @get_blob Cache-Control "public, max-age=31536000, immutable"
+
+    request_body {
+        max_size 100MB
+    }
+
+    reverse_proxy files:8080
+    log {
+        output stdout
+        format console
+    }
+}

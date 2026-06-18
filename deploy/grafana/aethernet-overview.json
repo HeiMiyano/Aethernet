@@ -1,0 +1,95 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "title": "Aethernet — Overview",
+  "uid": "aethernet-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["aethernet"],
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "timezone": "browser",
+  "templating": {
+    "list": [
+      {
+        "name": "ds",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Live hub connections",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [{ "expr": "sum(aethernet_hub_connections_active)" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" } } }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Pushes / sec",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [{ "expr": "sum(rate(aethernet_hub_push_recipients_total[1m]))" }]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Files uploaded (MiB / hr)",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [{ "expr": "sum(rate(aethernet_files_upload_bytes_total[1h])) * 3600 / 1048576" }]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Files served (MiB / hr)",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [{ "expr": "sum(rate(aethernet_files_download_bytes_total[1h])) * 3600 / 1048576" }]
+    },
+
+    {
+      "id": 10, "type": "timeseries", "title": "Push fan-out (recipients / sec)",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [{ "expr": "sum(rate(aethernet_hub_push_recipients_total[1m]))", "legendFormat": "recipients/s" }]
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Push duration p50/p95/p99 (s)",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(aethernet_hub_push_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(aethernet_hub_push_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(aethernet_hub_push_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+
+    {
+      "id": 20, "type": "timeseries", "title": "Login attempts / sec by outcome",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [{ "expr": "sum by (outcome) (rate(aethernet_auth_login_attempts_total[1m]))", "legendFormat": "{{outcome}}" }]
+    },
+    {
+      "id": 21, "type": "timeseries", "title": "Registrations / hr by source",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [{ "expr": "sum by (via) (rate(aethernet_auth_registrations_total[1h])) * 3600", "legendFormat": "{{via}}" }]
+    },
+
+    {
+      "id": 30, "type": "timeseries", "title": "File-cache dedupe ratio",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [{
+        "expr": "sum(rate(aethernet_files_upload_dedupe_total[5m])) / clamp_min(sum(rate(aethernet_files_upload_dedupe_total[5m])) + sum(rate(aethernet_files_upload_bytes_total[5m]) > 0), 1)",
+        "legendFormat": "dedupe hit %"
+      }]
+    },
+    {
+      "id": 31, "type": "timeseries", "title": "Orphan-blob GC activity",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [{ "expr": "sum by (kind) (rate(aethernet_files_orphan_gc_total[5m]))", "legendFormat": "{{kind}}" }]
+    }
+  ]
+}

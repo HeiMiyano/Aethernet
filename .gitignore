@@ -1,0 +1,54 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.idea/
+*.swp
+*.DotSettings.user
+
+## Build output
+artifacts/
+publish/
+out/
+
+## Test output
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+## Secrets / local config
+appsettings.Development.json
+appsettings.Local.json
+.env
+.env.local
+secrets/
+*.pfx
+*.key
+
+## OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+## Docker volumes (local dev)
+deploy/data/
+
+## Local inspection scratch dir (Penumbra/Glamourer reflection probes)
+inspect-tmp/
+inspect-out.txt
+inspect.cs
+
+## VS workspace cruft + locally generated certs
+.vscode/
+*.local.yml
+*.local.yaml
+
+## Build/test scratch
+build.log
+*.log
+test_marker.txt
+test.ps
+test.ps1

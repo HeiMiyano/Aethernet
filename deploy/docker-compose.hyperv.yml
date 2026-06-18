@@ -1,0 +1,103 @@
+name: aethernet-hyperv
+
+# Hyper-V single-VM production stack. Mod blobs live on the VM disk (no S3).
+# Cloudflare Tunnel handles HTTPS termination at Cloudflare's edge — no Caddy,
+# no Let's Encrypt, no inbound ports opened on your router. Cost: $0/mo.
+#
+# To switch this from "behind a tunnel" to "directly internet-exposed," see
+# deploy/docker-compose.prod.yml — it adds Caddy and removes cloudflared.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     aethernet
+      POSTGRES_DB:       aethernet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aethernet"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+
+  auth:
+    build:
+      context: ..
+      dockerfile: src/Aethernet.AuthService/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: "Host=postgres;Database=aethernet;Username=aethernet;Password=${POSTGRES_PASSWORD}"
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY must be set in .env}
+      Jwt__Issuer:     ${JWT_ISSUER:-aethernet-auth}
+      Jwt__Audience:   ${JWT_AUDIENCE:-aethernet-hub}
+      # Discord OAuth — leave blank to disable
+      Discord__ClientId:     ${DISCORD_CLIENT_ID:-}
+      Discord__ClientSecret: ${DISCORD_CLIENT_SECRET:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  hub:
+    build:
+      context: ..
+      dockerfile: src/Aethernet.Server/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: "Host=postgres;Database=aethernet;Username=aethernet;Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__Redis:   "redis:6379"
+      Jwt__SigningKey: ${JWT_SIGNING_KEY}
+      Jwt__Issuer:     ${JWT_ISSUER:-aethernet-auth}
+      Jwt__Audience:   ${JWT_AUDIENCE:-aethernet-hub}
+      Motd:            ${MOTD:-Welcome to Aethernet.}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_started }
+
+  files:
+    build:
+      context: ..
+      dockerfile: src/Aethernet.FileServer/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: "Host=postgres;Database=aethernet;Username=aethernet;Password=${POSTGRES_PASSWORD}"
+      Jwt__SigningKey: ${JWT_SIGNING_KEY}
+      Jwt__Issuer:     ${JWT_ISSUER:-aethernet-auth}
+      Jwt__Audience:   ${JWT_AUDIENCE:-aethernet-hub}
+      # Local disk store — Storage:Mode != "s3" picks DiskBlobStore.
+      Storage__Mode:   disk
+      Storage__Path:   /var/aethernet/blobs
+      Storage__DefaultQuotaBytes: ${FILE_QUOTA_BYTES:-5368709120}
+    volumes:
+      - blob-storage:/var/aethernet/blobs
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      # Token comes from the Zero Trust dashboard when you create the tunnel.
+      # cloudflared dials out to Cloudflare on TCP/443 — no inbound ports needed.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN must be set in .env}
+    depends_on:
+      auth:  { condition: service_started }
+      hub:   { condition: service_started }
+      files: { condition: service_started }
+
+volumes:
+  postgres-data:
+  redis-data:
+  blob-storage:

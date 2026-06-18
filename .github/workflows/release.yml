@@ -1,0 +1,133 @@
+name: release
+
+# Triggers on tag push like `v0.2.1`. To cut a release locally:
+#   git tag v0.2.1 -m "feat: ..." && git push origin v0.2.1
+# The job builds the Dalamud plugin, zips it into the layout Dalamud expects,
+# attaches the zip to a GitHub Release, and updates repo.json on the default
+# branch so the in-game installer sees the new version on its next refresh.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # needed to push repo.json back to main + create releases
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download Dalamud reference assemblies
+        # The plugin csproj references DLLs from %AppData%\XIVLauncher\addon\Hooks\dev
+        # which isn't present in CI. The dalamud-distrib repo mirrors the latest API DLLs.
+        shell: pwsh
+        run: |
+          $hooksDir = "$env:APPDATA\XIVLauncher\addon\Hooks\dev"
+          New-Item -ItemType Directory -Force $hooksDir | Out-Null
+          $zipPath  = "$env:RUNNER_TEMP\dalamud-latest.zip"
+          Invoke-WebRequest -Uri "https://github.com/goatcorp/dalamud-distrib/raw/main/latest.zip" -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath $hooksDir -Force
+
+      - name: Extract version from tag
+        id: ver
+        shell: bash
+        run: |
+          # v0.2.1 -> 0.2.1
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "version_4part=${GITHUB_REF_NAME#v}.0" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp version into the plugin manifest
+        shell: pwsh
+        run: |
+          $manifest = "src/Aethernet.Plugin/Aethernet.Plugin.json"
+          $json = Get-Content $manifest -Raw | ConvertFrom-Json
+          $json.AssemblyVersion = "${{ steps.ver.outputs.version_4part }}"
+          $json.RepoUrl         = "https://github.com/${{ github.repository }}"
+          # AssemblyFileVersion isn't required by Dalamud but useful for diagnostics
+          $json | ConvertTo-Json -Depth 10 | Set-Content $manifest -Encoding utf8
+
+      - name: Build plugin (Release)
+        run: dotnet build src/Aethernet.Plugin -c Release /p:Version=${{ steps.ver.outputs.version }}
+
+      - name: Package into Dalamud-installable zip
+        shell: pwsh
+        run: |
+          # Dalamud expects a flat zip containing the plugin DLL, its dependencies, and
+          # the *.json manifest, all at the root. The build output already has the right
+          # layout — we just need to zip it up under the InternalName.
+          $buildDir = "src/Aethernet.Plugin/bin/Release"
+          $stage    = "$env:RUNNER_TEMP/Aethernet"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item -Path "$buildDir/*" -Destination $stage -Recurse -Force
+          Compress-Archive -Path "$stage/*" -DestinationPath "$env:RUNNER_TEMP/latest.zip" -Force
+          echo "Wrote $env:RUNNER_TEMP/latest.zip"
+          Get-Item "$env:RUNNER_TEMP/latest.zip" | Select-Object FullName, Length
+
+      - name: Create / update GitHub Release with the zip + manifest
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: |
+            See `repo.json` on the default branch for the Dalamud-installable repository URL.
+            Built from commit ${{ github.sha }}.
+          files: |
+            ${{ runner.temp }}/latest.zip
+            src/Aethernet.Plugin/Aethernet.Plugin.json
+
+      - name: Regenerate repo.json with the new release URLs
+        shell: pwsh
+        run: |
+          $version = "${{ steps.ver.outputs.version_4part }}"
+          $tag     = "${{ github.ref_name }}"
+          $repo    = "${{ github.repository }}"
+          $manifest = Get-Content "src/Aethernet.Plugin/Aethernet.Plugin.json" -Raw | ConvertFrom-Json
+          $downloadUrl = "https://github.com/$repo/releases/download/$tag/latest.zip"
+
+          $repoEntry = [ordered]@{
+            Author              = $manifest.Author
+            Name                = $manifest.Name
+            InternalName        = $manifest.InternalName
+            AssemblyVersion     = $version
+            TestingAssemblyVersion = $version
+            Description         = $manifest.Description
+            Punchline           = $manifest.Punchline
+            ApplicableVersion   = $manifest.ApplicableVersion
+            Tags                = $manifest.Tags
+            RepoUrl             = "https://github.com/$repo"
+            IconUrl             = $manifest.IconUrl
+            DownloadLinkInstall = $downloadUrl
+            DownloadLinkUpdate  = $downloadUrl
+            DownloadLinkTesting = $downloadUrl
+            DalamudApiLevel     = 15
+            IsHide              = $false
+            IsTestingExclusive  = $false
+          }
+          $repoJson = @($repoEntry) | ConvertTo-Json -Depth 10
+          Set-Content -Path "repo.json" -Value $repoJson -Encoding utf8
+          Get-Content "repo.json"
+
+      - name: Commit updated repo.json + bumped manifest back to default branch
+        shell: bash
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin
+          git checkout -B "${{ github.event.repository.default_branch }}" "origin/${{ github.event.repository.default_branch }}"
+          git add repo.json src/Aethernet.Plugin/Aethernet.Plugin.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore(release): publish ${{ github.ref_name }}"
+            git push origin "${{ github.event.repository.default_branch }}"
+          fi

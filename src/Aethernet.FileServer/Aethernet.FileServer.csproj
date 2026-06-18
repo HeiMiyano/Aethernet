@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Aethernet.FileServer</RootNamespace>
+    <UserSecretsId>aethernet-files-dev</UserSecretsId>
+    <Description>Content-addressed mod blob CDN. Uploads keyed by SHA-1; ranged downloads; quota enforcement.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Aethernet.API\Aethernet.API.csproj" />
+    <ProjectReference Include="..\Aethernet.Data\Aethernet.Data.csproj" />
+    <ProjectReference Include="..\Aethernet.Shared\Aethernet.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.10" />
+    <PackageReference Include="AWSSDK.S3" Version="3.7.404.6" />
+    <PackageReference Include="K4os.Compression.LZ4.Streams"          Version="1.3.8" />
+    <PackageReference Include="prometheus-net.AspNetCore"          Version="8.2.1" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="8.0.10" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.3" />
+  </ItemGroup>
+
+</Project>

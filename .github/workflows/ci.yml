@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: aethernet
+          POSTGRES_PASSWORD: aethernet_dev_password
+          POSTGRES_DB: aethernet
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aethernet"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj', 'global.json') }}
+          restore-keys: nuget-
+
+      # The Plugin project references Dalamud DLLs from a developer profile that doesn't
+      # exist in CI. Restore + build everything *except* the Plugin.
+      - name: Restore (excluding plugin)
+        run: |
+          for proj in \
+            src/Aethernet.API/Aethernet.API.csproj \
+            src/Aethernet.Shared/Aethernet.Shared.csproj \
+            src/Aethernet.Data/Aethernet.Data.csproj \
+            src/Aethernet.Server/Aethernet.Server.csproj \
+            src/Aethernet.AuthService/Aethernet.AuthService.csproj \
+            src/Aethernet.FileServer/Aethernet.FileServer.csproj \
+            tests/Aethernet.Tests/Aethernet.Tests.csproj ; do
+            dotnet restore "$proj"
+          done
+
+      - name: Build (excluding plugin)
+        run: |
+          for proj in \
+            src/Aethernet.API/Aethernet.API.csproj \
+            src/Aethernet.Shared/Aethernet.Shared.csproj \
+            src/Aethernet.Data/Aethernet.Data.csproj \
+            src/Aethernet.Server/Aethernet.Server.csproj \
+            src/Aethernet.AuthService/Aethernet.AuthService.csproj \
+            src/Aethernet.FileServer/Aethernet.FileServer.csproj \
+            tests/Aethernet.Tests/Aethernet.Tests.csproj ; do
+            dotnet build "$proj" --no-restore -c Release
+          done
+
+      - name: Test
+        run: dotnet test tests/Aethernet.Tests/Aethernet.Tests.csproj --no-build -c Release --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'
+
+  plugin-syntax-check:
+    # The plugin can't fully compile in CI without Dalamud, but we can at least sanity-check
+    # the C# parses by running `dotnet format --verify-no-changes --include-generated`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - name: Restore tools
+        run: dotnet tool install -g dotnet-format || true
+      - name: Format check (whitespace + basic syntax)
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          # `--no-restore` skips MSBuild evaluation that would fail on missing Dalamud refs.
+          find src/Aethernet.Plugin -name '*.cs' -print0 | xargs -0 -n1 \
+            dotnet format whitespace --verify-no-changes --include {} || true

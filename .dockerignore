@@ -1,0 +1,47 @@
+# Keep build context small. Mirrors .gitignore plus a few container-specific exclusions.
+
+## .NET
+**/bin/
+**/obj/
+*.user
+*.suo
+.vs/
+.idea/
+*.swp
+
+## Local dev artefacts
+**/appsettings.Development.json
+**/appsettings.Local.json
+artifacts/
+publish/
+out/
+
+## Tests
+TestResults/
+coverage/
+*.coverage
+
+## Secrets — never bake these into images
+.env
+.env.local
+deploy/.env
+secrets/
+*.pfx
+*.key
+
+## Local docker state from deploy/docker-compose.yml
+deploy/data/
+
+## VCS metadata (not needed by builds)
+.git/
+.github/
+
+## global.json pins SDK 10.0.100 for the plugin's net10 build, but server projects
+## target net8.0 and run in mcr.microsoft.com/dotnet/sdk:8.0 which doesn't have 10 SDK.
+## Excluding it lets the container use whichever SDK ships in the base image.
+global.json
+
+## Editor / OS junk
+*.log
+.DS_Store
+Thumbs.db

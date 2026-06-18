@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <RootNamespace>Aethernet.API</RootNamespace>
+    <AssemblyName>Aethernet.API</AssemblyName>
+    <Description>Shared DTOs, hub-method constants, and route definitions used by both the Aethernet plugin and the Aethernet server.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MessagePack" Version="2.5.187" />
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+</Project>
