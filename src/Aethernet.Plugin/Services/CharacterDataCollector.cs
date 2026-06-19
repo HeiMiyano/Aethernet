@@ -133,9 +133,13 @@ public sealed class CharacterDataCollector
                 appearances[per.Kind] = dto;
             }
 
+            // Build the DTO with DataVersion = 0 so the hash only depends on actual character data.
+            // If DataVersion were included, it'd bump on every collect and the hash would never
+            // match across consecutive calls — defeating the "skip push when nothing changed"
+            // dedupe in SyncOrchestrator and causing constant unnecessary pushes.
             var fullDto = new CharacterDataDto
             {
-                DataVersion       = Interlocked.Increment(ref _version),
+                DataVersion       = 0,
                 Appearances       = appearances,
                 GlamourerData     = snapshot.GlamourerData,
                 CustomizePlusData = snapshot.CustomizeData,
@@ -145,7 +149,14 @@ public sealed class CharacterDataCollector
                 PetNamesData      = snapshot.PetNamesData,
                 BrioData          = snapshot.BrioData,
             };
-            fullDto = fullDto with { DataHash = ComputeStableHash(fullDto) };
+            var stableHash = ComputeStableHash(fullDto);
+            // Assign DataVersion + DataHash after hashing so DataVersion doesn't perturb the hash
+            // but still gets a unique monotonic value for receivers' dedup-by-version check.
+            fullDto = fullDto with
+            {
+                DataVersion = Interlocked.Increment(ref _version),
+                DataHash    = stableHash,
+            };
             return (fullDto, hashToPath);
         }, ct).ConfigureAwait(false);
     }
