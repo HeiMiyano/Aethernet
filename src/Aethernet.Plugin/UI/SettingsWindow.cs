@@ -33,9 +33,12 @@ public sealed class SettingsWindow : Window
     {
         if (ImGui.CollapsingHeader("Servers", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            DrawTextSetting("Auth server URL",  () => _config.AuthServerUrl, v => _config.AuthServerUrl = v);
-            DrawTextSetting("Hub server URL",   () => _config.HubServerUrl,  v => _config.HubServerUrl  = v);
-            DrawTextSetting("File server URL",  () => _config.FileServerUrl, v => _config.FileServerUrl = v);
+            // Server endpoints are baked into the plugin at build time so this distribution
+            // only ever connects to official Aethernet infrastructure. To run on a different
+            // deployment, edit src/Aethernet.Plugin/AethernetServers.cs and rebuild from source.
+            ImGui.TextDisabled("Auth:  "); ImGui.SameLine(); ImGui.TextUnformatted(AethernetServers.AuthUrl);
+            ImGui.TextDisabled("Hub:   "); ImGui.SameLine(); ImGui.TextUnformatted(AethernetServers.HubUrl);
+            ImGui.TextDisabled("Files: "); ImGui.SameLine(); ImGui.TextUnformatted(AethernetServers.FileUrl);
         }
 
         if (ImGui.CollapsingHeader("Account", ImGuiTreeNodeFlags.DefaultOpen))
@@ -130,16 +133,10 @@ public sealed class SettingsWindow : Window
         }
     }
 
-    private static void DrawTextSetting(string label, Func<string> get, Action<string> set)
-    {
-        var v = get();
-        if (ImGui.InputText(label, ref v, 512)) set(v);
-    }
-
     private async Task RegisterAsync(string? recoverySecret)
     {
         using var http = new HttpClient();
-        var url  = $"{_config.AuthServerUrl.TrimEnd('/')}{Routes.Auth.Register}";
+        var url  = $"{AethernetServers.AuthUrl.TrimEnd('/')}{Routes.Auth.Register}";
         var resp = await http.PostAsJsonAsync(url, new RegisterRequestDto(string.IsNullOrWhiteSpace(recoverySecret) ? null : recoverySecret));
         if (!resp.IsSuccessStatusCode) return;
         var body = await resp.Content.ReadFromJsonAsync<RegisterResponseDto>();

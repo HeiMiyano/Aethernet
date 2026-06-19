@@ -43,7 +43,7 @@ public sealed class FileTransferService : IDisposable
             MaxConnectionsPerServer  = 16,
         })
         {
-            BaseAddress = new Uri(_config.FileServerUrl, UriKind.Absolute),
+            BaseAddress = new Uri(AethernetServers.FileUrl, UriKind.Absolute),
             Timeout     = TimeSpan.FromMinutes(10),
         };
     }

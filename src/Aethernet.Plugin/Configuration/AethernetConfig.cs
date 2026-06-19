@@ -7,13 +7,11 @@ public sealed class AethernetConfig : IPluginConfiguration
 {
     public int Version { get; set; } = 1;
 
-    // ---- server endpoints ----
-    // Defaults point at the heimiyano test deployment so the wizard pre-populates with
-    // working values out of the box. Power users can still edit these in /aethernet settings
-    // — e.g. set them back to http://localhost:500{1,2,3} for local dev.
-    public string AuthServerUrl { get; set; } = "https://auth-aethernet.heimiyano.com/";
-    public string HubServerUrl  { get; set; } = "https://hub-aethernet.heimiyano.com/";
-    public string FileServerUrl { get; set; } = "https://files-aethernet.heimiyano.com/";
+    // Server endpoints are intentionally NOT in config — they're compile-time constants in
+    // AethernetServers (see /src/Aethernet.Plugin/AethernetServers.cs). Distributed plugin
+    // only connects to official Aethernet infra; running on a fork's server requires editing
+    // source + rebuilding. Old configs with AuthServerUrl/HubServerUrl/FileServerUrl JSON
+    // properties deserialize fine (System.Text.Json ignores unknown properties by default).
 
     // ---- credentials ----
     public string? Uid              { get; set; }
