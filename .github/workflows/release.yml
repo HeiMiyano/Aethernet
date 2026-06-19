@@ -135,14 +135,35 @@ jobs:
       - name: Commit updated repo.json + bumped manifest back to default branch
         shell: bash
         run: |
+          set -e
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          TAG="${{ github.ref_name }}"
+
+          # Snapshot the two files we want to publish — they were modified by earlier
+          # steps (Stamp Version, Regenerate repo.json) and will be clobbered when we
+          # switch branches, so save them to a temp location first.
+          TMPDIR="$(mktemp -d)"
+          cp repo.json                                  "$TMPDIR/repo.json"
+          cp src/Aethernet.Plugin/Aethernet.Plugin.json "$TMPDIR/manifest.json"
+
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin
-          git checkout -B "${{ github.event.repository.default_branch }}" "origin/${{ github.event.repository.default_branch }}"
+          git fetch origin "$DEFAULT_BRANCH"
+
+          # Hard-reset onto origin's default branch. This wipes the working tree changes
+          # we just snapshotted, but that's intentional — we don't want to carry the rest
+          # of the tag's diff onto main.
+          git switch -C "$DEFAULT_BRANCH" "origin/$DEFAULT_BRANCH"
+          git reset --hard "origin/$DEFAULT_BRANCH"
+
+          # Restore the two files we actually want to publish back to main.
+          cp "$TMPDIR/repo.json"     repo.json
+          cp "$TMPDIR/manifest.json" src/Aethernet.Plugin/Aethernet.Plugin.json
+
           git add repo.json src/Aethernet.Plugin/Aethernet.Plugin.json
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "chore(release): publish ${{ github.ref_name }}"
-            git push origin "${{ github.event.repository.default_branch }}"
+            git commit -m "chore(release): publish $TAG"
+            git push origin "$DEFAULT_BRANCH"
           fi
