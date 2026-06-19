@@ -153,11 +153,12 @@ public sealed class PenumbraIpc : IDisposable
     }
 
     /// <summary>
-    /// Returns whether the given mod is enabled (effective) in the given collection.
-    /// Return tuple shape per IPC: (PenumbraApiEc, (enabled, priority, settings, inheritance)?).
-    /// We only care about the boolean enabled flag.
+    /// Returns the user's current settings for the given mod in the given collection.
+    /// Returns null if mod isn't enabled. Otherwise returns (enabled, priority, selectedOptions)
+    /// where selectedOptions is a dict of GroupName → [selected option names].
     /// </summary>
-    public bool IsModEnabled(Guid collectionId, string modDirectory, string modName)
+    private (bool Enabled, int Priority, Dictionary<string, List<string>> SelectedOptions)? GetModSettings(
+        Guid collectionId, string modDirectory, string modName)
     {
         try
         {
@@ -165,18 +166,26 @@ public sealed class PenumbraIpc : IDisposable
                 (int status, (bool enabled, int priority, Dictionary<string, List<string>> settings, bool inherit)?)>(
                 GetCurrentModSettingsLabel);
             var (status, payload) = s.InvokeFunc(collectionId, modDirectory, modName, false);
-            if (status != 0 || payload is null) return false;
-            return payload.Value.enabled;
+            if (status != 0 || payload is null) return null;
+            var p = payload.Value;
+            if (!p.enabled) return null;
+            return (p.enabled, p.priority, p.settings ?? new Dictionary<string, List<string>>());
         }
-        catch (Exception ex) { _log.LogDebug("IsModEnabled failed for {Mod}: {Msg}", modDirectory, ex.Message); return false; }
+        catch (Exception ex) { _log.LogDebug("GetModSettings failed for {Mod}: {Msg}", modDirectory, ex.Message); return null; }
     }
 
+    public bool IsModEnabled(Guid collectionId, string modDirectory, string modName)
+        => GetModSettings(collectionId, modDirectory, modName) is not null;
+
     /// <summary>
-    /// Enumerates every file under every mod enabled in the local player's effective collection.
-    /// This is the supplement to GetResourcePaths: animations (.pap), sounds (.scd), VFX (.avfx)
-    /// only show up in resource enumeration when actively playing, so we have to walk the mod
-    /// directories to capture them ahead of time. Returns (gameAssumedPath, actualFilePath) pairs
-    /// where gameAssumedPath is derived from the file's location relative to the mod directory.
+    /// Enumerates files for every mod enabled in the local player's effective collection,
+    /// respecting per-group option SELECTIONS. Previous implementation walked every file in
+    /// every mod folder regardless of option — for option groups where multiple options replace
+    /// the same game path (e.g. an animation mod with 12 different "Hightail/Lowtail × wiggle"
+    /// combinations all replacing chara/.../idle.pap), the last-enumerated option's file would
+    /// win in the mapping dict, which is almost never the option the user actually selected.
+    /// We now read each mod's default_mod.json + group_*.json to identify exactly which files
+    /// belong to each selected option, and only yield those.
     /// </summary>
     public IEnumerable<(string GamePath, string ActualPath)> EnumerateActiveModFiles(int objectIndex)
     {
@@ -194,30 +203,130 @@ public sealed class PenumbraIpc : IDisposable
         int enabledCount = 0, fileCount = 0;
         foreach (var (modDir, modName) in mods)
         {
-            if (!IsModEnabled(coll.Value.CollectionId, modDir, modName)) continue;
+            var settings = GetModSettings(coll.Value.CollectionId, modDir, modName);
+            if (settings is null) continue;
             enabledCount++;
             var fullDir = Path.Combine(modRoot, modDir);
             if (!Directory.Exists(fullDir)) continue;
 
-            foreach (var file in Directory.EnumerateFiles(fullDir, "*", SearchOption.AllDirectories))
+            List<(string GamePath, string ActualPath)> yielded;
+            try
             {
-                // Skip non-game files (meta.json, default_mod.json, group_*.json, README.md, etc.)
-                var ext = Path.GetExtension(file).ToLowerInvariant();
-                if (ext is ".json" or ".md" or ".txt" or ".pmp" or ".ttmp" or ".ttmp2") continue;
+                yielded = ResolveSelectedModFiles(fullDir, settings.Value.SelectedOptions).ToList();
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning("ResolveSelectedModFiles failed for {Mod}, falling back to directory walk: {Msg}", modDir, ex.Message);
+                yielded = FallbackWalkModFiles(fullDir).ToList();
+            }
 
-                // Penumbra mods nest game paths arbitrarily deep inside option-group folders.
-                // E.g. "D:\Mod\WUFFY Tails\all files - required\all files [required]\chara\human\..."
-                // The actual game-path portion starts at the FIRST recognized root segment (chara,
-                // common, etc.) anywhere in the path — not at the immediate relative root.
-                var unixFull = file.Replace('\\', '/');
-                var gamePath = ExtractGamePath(unixFull);
-                if (gamePath is null) continue;
-
+            foreach (var pair in yielded)
+            {
                 fileCount++;
-                yield return (gamePath, file);
+                yield return pair;
             }
         }
         _log.LogInformation("EnumerateActiveModFiles: {Enabled} enabled mods, {Files} game files yielded", enabledCount, fileCount);
+    }
+
+    /// <summary>
+    /// Reads default_mod.json (always-active files) plus each group_*.json (option groups),
+    /// honoring the user's selectedOptions for each group, and returns the EFFECTIVE file
+    /// replacements. Each yielded (gamePath, actualPath) pair maps a game path to the absolute
+    /// on-disk path of the mod file that replaces it for this user's current option selection.
+    /// </summary>
+    private static IEnumerable<(string GamePath, string ActualPath)> ResolveSelectedModFiles(
+        string modFullDir, Dictionary<string, List<string>> selectedOptions)
+    {
+        // default_mod.json — always-on files (no group). Add first; group selections can override
+        // for the same gamePath but in practice this rarely conflicts.
+        var defaultJson = Path.Combine(modFullDir, "default_mod.json");
+        if (File.Exists(defaultJson))
+        {
+            foreach (var (gp, rel) in ReadFilesFromOptionJson(defaultJson))
+                yield return (gp, Path.Combine(modFullDir, rel.Replace('/', Path.DirectorySeparatorChar)));
+        }
+
+        // Each group_NNN_*.json file is an option group. Parse it, find the selected option(s),
+        // and pull their Files mapping.
+        foreach (var groupJson in Directory.EnumerateFiles(modFullDir, "group_*.json", SearchOption.TopDirectoryOnly))
+        {
+            (string GroupName, string Type, List<(string Name, Dictionary<string,string> Files)> Options) parsed;
+            try { parsed = ReadGroupJson(groupJson); }
+            catch { continue; }
+
+            // Look up which options the user selected for this group. If the group isn't in
+            // selectedOptions at all (e.g. the user never opened it), fall back to Single-type
+            // default of the first option; for Multi, no options selected = nothing yielded.
+            if (!selectedOptions.TryGetValue(parsed.GroupName, out var picks) || picks is null || picks.Count == 0)
+            {
+                if (string.Equals(parsed.Type, "Single", StringComparison.OrdinalIgnoreCase) && parsed.Options.Count > 0)
+                    picks = new List<string> { parsed.Options[0].Name };
+                else
+                    continue;
+            }
+
+            foreach (var pick in picks)
+            {
+                var opt = parsed.Options.FirstOrDefault(o => string.Equals(o.Name, pick, StringComparison.Ordinal));
+                if (opt.Files is null) continue;
+                foreach (var (gp, rel) in opt.Files)
+                    yield return (gp, Path.Combine(modFullDir, rel.Replace('/', Path.DirectorySeparatorChar)));
+            }
+        }
+    }
+
+    /// <summary>Reads the "Files" mapping (gamePath → relativePath) from default_mod.json
+    /// or an option object inside group_*.json.</summary>
+    private static IEnumerable<(string GamePath, string RelativePath)> ReadFilesFromOptionJson(string jsonPath)
+    {
+        using var stream = File.OpenRead(jsonPath);
+        using var doc = System.Text.Json.JsonDocument.Parse(stream);
+        if (!doc.RootElement.TryGetProperty("Files", out var files) || files.ValueKind != System.Text.Json.JsonValueKind.Object)
+            yield break;
+        foreach (var prop in files.EnumerateObject())
+            yield return (prop.Name, prop.Value.GetString() ?? "");
+    }
+
+    private static (string GroupName, string Type, List<(string Name, Dictionary<string,string> Files)> Options)
+        ReadGroupJson(string path)
+    {
+        using var stream = File.OpenRead(path);
+        using var doc = System.Text.Json.JsonDocument.Parse(stream);
+        var root = doc.RootElement;
+        var groupName = root.TryGetProperty("Name", out var n) ? n.GetString() ?? "" : "";
+        var type      = root.TryGetProperty("Type", out var t) ? t.GetString() ?? "Single" : "Single";
+        var options   = new List<(string, Dictionary<string,string>)>();
+        if (root.TryGetProperty("Options", out var opts) && opts.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            foreach (var opt in opts.EnumerateArray())
+            {
+                var optName = opt.TryGetProperty("Name", out var on) ? on.GetString() ?? "" : "";
+                var optFiles = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (opt.TryGetProperty("Files", out var of) && of.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    foreach (var f in of.EnumerateObject())
+                        optFiles[f.Name] = f.Value.GetString() ?? "";
+                }
+                options.Add((optName, optFiles));
+            }
+        }
+        return (groupName, type, options);
+    }
+
+    /// <summary>Fallback when JSON parsing fails — keeps the old directory-walk behavior so we
+    /// at least catch SOME files for mods with non-standard layouts.</summary>
+    private IEnumerable<(string GamePath, string ActualPath)> FallbackWalkModFiles(string fullDir)
+    {
+        foreach (var file in Directory.EnumerateFiles(fullDir, "*", SearchOption.AllDirectories))
+        {
+            var ext = Path.GetExtension(file).ToLowerInvariant();
+            if (ext is ".json" or ".md" or ".txt" or ".pmp" or ".ttmp" or ".ttmp2") continue;
+            var unixFull = file.Replace('\\', '/');
+            var gamePath = ExtractGamePath(unixFull);
+            if (gamePath is null) continue;
+            yield return (gamePath, file);
+        }
     }
 
     // FFXIV's top-level data directories. A Penumbra mod file's "game path" is the substring
