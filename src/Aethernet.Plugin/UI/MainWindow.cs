@@ -170,22 +170,164 @@ public sealed class MainWindow : Window
         ImGui.EndChild();
     }
 
+    // ----------------------------------------------------------------------------
+    //  Per-pair sync permissions editor
+    // ----------------------------------------------------------------------------
+    // Direction: these permissions apply on RECEIVE. Toggling a "Block their X"
+    // checkbox means "this pair's character data still gets pushed to me, but my
+    // applier strips X before handing it to Penumbra/Glamourer/etc.". The pair
+    // sees nothing different in their own UI; the change only affects what we
+    // accept locally.
+    // ----------------------------------------------------------------------------
+
+    private sealed record PermRow(UserPermissions Flag, string Label, string Tooltip);
+
+    private static readonly (string Section, PermRow[] Rows)[] PermSections =
+    {
+        ("Session", new[]
+        {
+            new PermRow(UserPermissions.Paused,            "Pause sync with this pair",
+                "Don't send or apply ANY data with this pair. Effectively a temporary mute."),
+        }),
+        ("Visuals", new[]
+        {
+            new PermRow(UserPermissions.DisableAnimations, "Block animations",
+                "Don't apply this pair's .pap animation files (idle, emote, walk cycles, etc.)."),
+            new PermRow(UserPermissions.DisableVfx,        "Block VFX",
+                "Don't apply this pair's .avfx visual-effect files (auras, particle trails)."),
+        }),
+        ("Audio", new[]
+        {
+            new PermRow(UserPermissions.DisableSounds,     "Block custom sounds",
+                "Don't apply this pair's .scd audio files (replaced footstep/voice/emote sounds)."),
+        }),
+        ("Companion plugins", new[]
+        {
+            new PermRow(UserPermissions.DisableCustomize,  "Block Customize+ profiles",
+                "Don't apply this pair's Customize+ body-scaling profile."),
+            new PermRow(UserPermissions.DisableHonorific,  "Block Honorific titles",
+                "Don't show this pair's custom Honorific title nameplate."),
+            new PermRow(UserPermissions.DisableMoodles,    "Block Moodles statuses",
+                "Don't apply this pair's custom Moodles status icons."),
+            new PermRow(UserPermissions.DisableHeels,      "Block SimpleHeels offsets",
+                "Don't apply this pair's heel-height vertical offset."),
+            new PermRow(UserPermissions.DisablePetNames,   "Block Pet Names",
+                "Don't show this pair's custom Pet Names labels."),
+        }),
+    };
+
+    private static readonly (string Label, string Tooltip, UserPermissions Flags)[] PermPresets =
+    {
+        ("Full sync",      "Apply everything this pair sends.",
+            UserPermissions.None),
+        ("Visual only",    "Apply visuals + animations, block social/audio plugins.",
+            UserPermissions.DisableSounds | UserPermissions.DisableHonorific |
+            UserPermissions.DisableMoodles | UserPermissions.DisableHeels |
+            UserPermissions.DisablePetNames),
+        ("Minimal",        "Body/gear only — no animations, no VFX, no sounds, no companion-plugin data.",
+            UserPermissions.DisableAnimations | UserPermissions.DisableVfx |
+            UserPermissions.DisableSounds | UserPermissions.DisableHonorific |
+            UserPermissions.DisableMoodles | UserPermissions.DisableHeels |
+            UserPermissions.DisablePetNames | UserPermissions.DisableCustomize),
+        ("Paused",         "Stop all data exchange with this pair.",
+            UserPermissions.Paused),
+    };
+
+    // Confirmation state for "Apply to all pairs"
+    private string?           _confirmApplyAllSourceUid;
+    private UserPermissions   _confirmApplyAllPerms;
+
     private void DrawPermissionsEditor(string uid, UserPermissions current)
     {
         var changed = false;
-        foreach (UserPermissions perm in Enum.GetValues<UserPermissions>())
+
+        // ---- preset bar ----
+        ImGui.TextDisabled("Presets:");
+        ImGui.SameLine();
+        foreach (var (label, tip, flags) in PermPresets)
         {
-            if (perm == UserPermissions.None) continue;
-            var has = current.HasFlag(perm);
-            if (ImGui.Checkbox(perm.ToString(), ref has))
+            if (ImGui.SmallButton($"{label}##preset_{uid}_{label}"))
             {
-                current = has ? current | perm : current & ~perm;
+                current = flags;
                 changed = true;
             }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(tip);
+            ImGui.SameLine();
         }
+        ImGui.NewLine();
+        ImGui.Separator();
+
+        // ---- categorized toggles ----
+        foreach (var (section, rows) in PermSections)
+        {
+            ImGui.TextDisabled(section);
+            foreach (var row in rows)
+            {
+                var has = current.HasFlag(row.Flag);
+                if (ImGui.Checkbox($"{row.Label}##{uid}_{row.Flag}", ref has))
+                {
+                    current = has ? current | row.Flag : current & ~row.Flag;
+                    changed = true;
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.PushTextWrapPos(360);
+                    ImGui.TextUnformatted(row.Tooltip);
+                    ImGui.PopTextWrapPos();
+                    ImGui.EndTooltip();
+                }
+            }
+            ImGui.Spacing();
+        }
+
+        ImGui.Separator();
+
+        // ---- bulk-apply: copy these permissions to ALL pairs ----
+        if (ImGui.Button($"Apply to all pairs##applyall_{uid}"))
+        {
+            _confirmApplyAllSourceUid = uid;
+            _confirmApplyAllPerms     = current;
+            ImGui.OpenPopup($"confirmApplyAll##{uid}");
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Copy these permission settings to every paired user.");
+
+        if (ImGui.BeginPopupModal($"confirmApplyAll##{uid}", ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.TextWrapped(
+                $"Apply these permissions to ALL {_pairs.All.Count} of your pairs?\n" +
+                "This will overwrite each pair's current settings.");
+            ImGui.Spacing();
+            if (ImGui.Button("Confirm##applyallok"))
+            {
+                ApplyPermissionsToAllPairs(_confirmApplyAllPerms);
+                _confirmApplyAllSourceUid = null;
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel##applyallno"))
+            {
+                _confirmApplyAllSourceUid = null;
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
+        }
+
         if (changed)
             _ = _hub.InvokeAsync(HubMethods.Server.UserSetPairPermissions,
                 new UserPermissionsDto(new UserDto(uid), current));
+    }
+
+    private void ApplyPermissionsToAllPairs(UserPermissions perms)
+    {
+        foreach (var pair in _pairs.All)
+        {
+            // Skip pairs that already match — avoids redundant hub calls and rate-limit pressure.
+            if (pair.Pair.OwnPermissions == perms) continue;
+            _ = _hub.InvokeAsync(HubMethods.Server.UserSetPairPermissions,
+                new UserPermissionsDto(pair.Pair.User, perms));
+        }
     }
 
     private void DrawGroupsTab()
