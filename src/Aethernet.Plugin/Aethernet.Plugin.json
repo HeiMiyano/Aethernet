@@ -2,7 +2,7 @@
   "Author": "Aethernet contributors",
   "Name": "Aethernet",
   "InternalName": "Aethernet",
-  "AssemblyVersion": "0.1.2.0",
+  "AssemblyVersion": "0.1.4.0",
   "Description": "Synchronize Penumbra mods, Glamourer state, Customize+, Honorific, SimpleHeels, Moodles and Pet Names between paired players. A clean-room replacement for Mare Synchronos.",
   "ApplicableVersion": "any",
   "Tags": [
