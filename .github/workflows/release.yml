@@ -150,11 +150,13 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin "$DEFAULT_BRANCH"
 
-          # Hard-reset onto origin's default branch. This wipes the working tree changes
-          # we just snapshotted, but that's intentional — we don't want to carry the rest
-          # of the tag's diff onto main.
-          git switch -C "$DEFAULT_BRANCH" "origin/$DEFAULT_BRANCH"
-          git reset --hard "origin/$DEFAULT_BRANCH"
+          # FORCE-checkout origin/main, discarding all working-tree changes from prior
+          # steps. (git switch -C and git checkout -B both refuse with a dirty tree;
+          # checkout -f is the only one that doesn't.) We've already snapshotted the two
+          # files we care about, so losing the rest of the working tree is intentional.
+          git checkout -f "origin/$DEFAULT_BRANCH"
+          # Re-attach to a named local branch so we can commit + push.
+          git switch -C "$DEFAULT_BRANCH"
 
           # Restore the two files we actually want to publish back to main.
           cp "$TMPDIR/repo.json"     repo.json

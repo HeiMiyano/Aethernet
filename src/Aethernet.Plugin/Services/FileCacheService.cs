@@ -51,7 +51,7 @@ public sealed class FileCacheService
         {
             // Hardlink is instant and shares disk space; fall back to a regular copy on filesystems
             // that don't support it (FAT32, some network drives) or if the file is already linked.
-            try { Microsoft.Win32.SafeHandles.SafeFileHandle? _ = null; CreateHardLink(extensioned, basePath, IntPtr.Zero); }
+            try { CreateHardLink(extensioned, basePath, IntPtr.Zero); }
             catch { /* fall through */ }
             if (!File.Exists(extensioned))
                 File.Copy(basePath, extensioned, overwrite: false);
