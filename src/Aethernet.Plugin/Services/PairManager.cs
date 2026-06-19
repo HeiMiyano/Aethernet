@@ -32,7 +32,20 @@ public sealed class PairManager
     {
         var set = online.ToDictionary(o => o.User.UID, o => o);
         foreach (var entry in _pairs.Values)
-            entry.IsOnline = set.ContainsKey(entry.Pair.User.UID);
+        {
+            if (set.TryGetValue(entry.Pair.User.UID, out var dto))
+            {
+                entry.IsOnline = true;
+                // Capture the latest ident too — VisibleUserManager uses this to match the pair's
+                // character against our object table. Without this, after a Reconnect we know the
+                // pair is online but can't match them visually because RemoteIdent is stale/null.
+                entry.RemoteIdent = dto.Ident;
+            }
+            else
+            {
+                entry.IsOnline = false;
+            }
+        }
         Raise();
     }
 
