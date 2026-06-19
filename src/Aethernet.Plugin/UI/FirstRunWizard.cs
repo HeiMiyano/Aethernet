@@ -189,7 +189,7 @@ public sealed class FirstRunWizard : Window
         try
         {
             using var http = new HttpClient();
-            var resp = await http.PostAsJsonAsync($"{_config.AuthServerUrl.TrimEnd('/')}{Routes.Auth.Register}",
+            var resp = await http.PostAsJsonAsync($"{AethernetServers.AuthUrl.TrimEnd('/')}{Routes.Auth.Register}",
                 new RegisterRequestDto(string.IsNullOrWhiteSpace(_recoverySecret) ? null : _recoverySecret));
             resp.EnsureSuccessStatusCode();
             var body = await resp.Content.ReadFromJsonAsync<RegisterResponseDto>();
@@ -224,7 +224,7 @@ public sealed class FirstRunWizard : Window
         try
         {
             using var http = new HttpClient();
-            var resp = await http.PostAsJsonAsync($"{_config.AuthServerUrl.TrimEnd('/')}{Routes.Auth.Recover}",
+            var resp = await http.PostAsJsonAsync($"{AethernetServers.AuthUrl.TrimEnd('/')}{Routes.Auth.Recover}",
                 new Dictionary<string,string> { ["recovery_secret"] = _recoverySecret });
             resp.EnsureSuccessStatusCode();
             var body = await resp.Content.ReadFromJsonAsync<RegisterResponseDto>();

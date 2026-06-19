@@ -110,7 +110,7 @@ public sealed class HubConnectionService : IAsyncDisposable
         {
             var jwt = await EnsureAccessTokenAsync();
             _hub = new HubConnectionBuilder()
-                .WithUrl($"{_config.HubServerUrl.TrimEnd('/')}{AethernetConstants.HubPath}?proto={AethernetConstants.ProtocolVersion}",
+                .WithUrl($"{AethernetServers.HubUrl.TrimEnd('/')}{AethernetConstants.HubPath}?proto={AethernetConstants.ProtocolVersion}",
                     o => { o.AccessTokenProvider = () => Task.FromResult<string?>(jwt); })
                 .AddMessagePackProtocol()
                 .WithAutomaticReconnect(new[] { 0, 2, 5, 10, 15, 30 }.Select(s => TimeSpan.FromSeconds(s)).ToArray())
@@ -167,7 +167,7 @@ public sealed class HubConnectionService : IAsyncDisposable
             return _config.AccessToken!;
 
         var resp = await _http.PostAsJsonAsync(
-            $"{_config.AuthServerUrl.TrimEnd('/')}{Routes.Auth.Login}",
+            $"{AethernetServers.AuthUrl.TrimEnd('/')}{Routes.Auth.Login}",
             new LoginRequestDto(_config.Uid!, _config.SecretKey!),
             _cts.Token);
         resp.EnsureSuccessStatusCode();
