@@ -1,10 +1,10 @@
-﻿[
+[
 {
   "Author": "Aethernet contributors",
   "Name": "Aethernet",
   "InternalName": "Aethernet",
-  "AssemblyVersion": "0.1.5.0",
-  "TestingAssemblyVersion": "0.1.5.0",
+  "AssemblyVersion": "0.1.6.0",
+  "TestingAssemblyVersion": "0.1.6.0",
   "Description": "Synchronize Penumbra mods, Glamourer state, Customize+, Honorific, SimpleHeels, Moodles and Pet Names between paired players. A clean-room replacement for Mare Synchronos.",
   "Punchline": "Mod synchronization, rebuilt.",
   "ApplicableVersion": "any",
@@ -17,9 +17,9 @@
   ],
   "RepoUrl": "https://github.com/HeiMiyano/Aethernet",
   "IconUrl": "",
-  "DownloadLinkInstall": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.5/latest.zip",
-  "DownloadLinkUpdate": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.5/latest.zip",
-  "DownloadLinkTesting": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.5/latest.zip",
+  "DownloadLinkInstall": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.6/latest.zip",
+  "DownloadLinkUpdate": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.6/latest.zip",
+  "DownloadLinkTesting": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.6/latest.zip",
   "DalamudApiLevel": 15,
   "IsHide": false,
   "IsTestingExclusive": false
