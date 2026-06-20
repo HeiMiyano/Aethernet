@@ -54,5 +54,8 @@ public sealed class AethernetConfig : IPluginConfiguration
     // ---- theming ----
     /// <summary>RGBA accent color used for highlights, the connected dot, and button hover. Defaults to a calm blue.</summary>
     public float[] AccentColor { get; set; } = new[] { 0.20f, 0.78f, 0.35f, 1.0f };
-    public float UiScale { get; set; } = 1.0f;
+    // UiScale was removed — it mutated the global ImGui style every frame, which compounded
+    // across frames and broke every other plugin's UI. Use Dalamud's "Interface Scale" in
+    // /xlsettings → Look and Feel for per-user UI scaling instead.
+    // Old configs with "UiScale": <n> JSON deserialize fine; the property is just dropped.
 }

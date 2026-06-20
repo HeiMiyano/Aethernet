@@ -43,9 +43,11 @@ public sealed class ThemeApplier : IDisposable
         style.Colors[(int)ImGuiCol.TabHovered]     = hover;
         style.Colors[(int)ImGuiCol.TabActive]      = active;
 
-        // Scale UI if user wants larger fonts.
-        if (Math.Abs(_config.UiScale - 1.0f) > 0.01f)
-            style.ScaleAllSizes(_config.UiScale);
+        // UI scaling deliberately NOT applied here — style.ScaleAllSizes() mutates the global
+        // ImGui style each frame, which compounds (frame N+1 scales an already-scaled style)
+        // and breaks every other plugin's UI. Users should use Dalamud's global "Interface
+        // Scale" setting in /xlsettings → Look and Feel instead. See git history for the
+        // removed UiScale config field.
     }
 
     public void Dispose() => _pi.UiBuilder.Draw -= PushTheme;

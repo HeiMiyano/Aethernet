@@ -120,9 +120,10 @@ public sealed class SettingsWindow : Window
             if (ImGui.ColorEdit4("Accent color", ref v))
                 _config.AccentColor = new[] { v.X, v.Y, v.Z, v.W };
 
-            var scale = _config.UiScale;
-            if (ImGui.SliderFloat("UI scale", ref scale, 0.75f, 2.0f, "%.2fx"))
-                _config.UiScale = scale;
+            // Note: per-plugin UI scaling was removed — ImGui.ScaleAllSizes mutates the global
+            // style each frame, which compounds and breaks every other Dalamud plugin's UI.
+            // Use Dalamud's global "Interface Scale" in /xlsettings → Look and Feel instead.
+            ImGui.TextDisabled("UI scale is set globally — see /xlsettings → Look and Feel.");
         }
 
         ImGui.Separator();
