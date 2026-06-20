@@ -1,0 +1,134 @@
+name: aethernet-cloud
+
+# Cloud-native production stack designed for Hetzner Cloud + Cloudflare R2.
+#
+#   * Compute:  one Hetzner VPS (CPX21/CPX31) runs all the .NET services + Postgres + Redis.
+#   * Blobs:    Cloudflare R2 via S3-compatible API. Zero egress fees — the only mod-sync
+#               cloud option that scales gracefully for the read-heavy workload we have.
+#   * Edge:     Cloudflare proxies all subdomains (DNS-only is fine, but proxied gives DDoS
+#               protection + caching for the file server). Caddy terminates TLS on the VPS.
+#
+# Cost at 10/100/500 users: ~$8 / $20 / $55 per month total. See docs/CLOUD_RUNBOOK.md.
+#
+# Differences vs. docker-compose.hyperv.yml:
+#   * files service uses S3BlobStore pointed at R2 (no local blob-storage volume).
+#   * cloudflared tunnel removed — Caddy terminates TLS directly with Let's Encrypt.
+#   * Cloudflare DNS points at the VPS public IP (proxy on/off your choice).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     aethernet
+      POSTGRES_DB:       aethernet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aethernet"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+
+  auth:
+    build:
+      context: ..
+      dockerfile: src/Aethernet.AuthService/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: "Host=postgres;Database=aethernet;Username=aethernet;Password=${POSTGRES_PASSWORD}"
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY must be set in .env}
+      Jwt__Issuer:     ${JWT_ISSUER:-aethernet-auth}
+      Jwt__Audience:   ${JWT_AUDIENCE:-aethernet-hub}
+      Discord__ClientId:     ${DISCORD_CLIENT_ID:-}
+      Discord__ClientSecret: ${DISCORD_CLIENT_SECRET:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  hub:
+    build:
+      context: ..
+      dockerfile: src/Aethernet.Server/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: "Host=postgres;Database=aethernet;Username=aethernet;Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__Redis:   "redis:6379"
+      Jwt__SigningKey: ${JWT_SIGNING_KEY}
+      Jwt__Issuer:     ${JWT_ISSUER:-aethernet-auth}
+      Jwt__Audience:   ${JWT_AUDIENCE:-aethernet-hub}
+      Motd:            ${MOTD:-Welcome to Aethernet.}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_started }
+
+  files:
+    build:
+      context: ..
+      dockerfile: src/Aethernet.FileServer/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: "Host=postgres;Database=aethernet;Username=aethernet;Password=${POSTGRES_PASSWORD}"
+      Jwt__SigningKey: ${JWT_SIGNING_KEY}
+      Jwt__Issuer:     ${JWT_ISSUER:-aethernet-auth}
+      Jwt__Audience:   ${JWT_AUDIENCE:-aethernet-hub}
+      # R2 (S3-compatible) blob storage. Endpoint format:
+      #   https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com
+      # AccessKey/SecretKey come from Cloudflare dashboard → R2 → Manage API Tokens.
+      # Region MUST be "auto" for R2 (some SDKs need a non-empty value).
+      Storage__Mode:     s3
+      Storage__Endpoint: ${R2_ENDPOINT:?R2_ENDPOINT must be set in .env}
+      Storage__Bucket:   ${R2_BUCKET:-aethernet-blobs}
+      Storage__Region:   auto
+      Storage__AccessKey: ${R2_ACCESS_KEY:?R2_ACCESS_KEY must be set in .env}
+      Storage__SecretKey: ${R2_SECRET_KEY:?R2_SECRET_KEY must be set in .env}
+      Storage__DefaultQuotaBytes: ${FILE_QUOTA_BYTES:-21474836480}  # 20 GB per user default
+      # Janitor — keeps R2 storage costs bounded by deleting unused blobs.
+      # 14 days is generous; tighten to 7 for tighter cost control.
+      Janitor__IntervalMinutes:     "15"
+      Janitor__MaxAgeDays:          "14"
+      Janitor__DiskPressureHighPct: "85"
+      Janitor__DiskPressureLowPct:  "70"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # Caddy reverse-proxies all three services behind their respective subdomains and
+  # auto-provisions Let's Encrypt certs. Replaces cloudflared from the hyperv stack.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    environment:
+      # Domains for each service. Caddyfile uses {$DOMAIN_*} placeholders.
+      DOMAIN_AUTH:  ${DOMAIN_AUTH:?DOMAIN_AUTH must be set in .env}
+      DOMAIN_HUB:   ${DOMAIN_HUB:?DOMAIN_HUB must be set in .env}
+      DOMAIN_FILES: ${DOMAIN_FILES:?DOMAIN_FILES must be set in .env}
+      # Email used to register the Let's Encrypt account (renewal warnings come here).
+      ACME_EMAIL:   ${ACME_EMAIL:?ACME_EMAIL must be set in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      auth:  { condition: service_started }
+      hub:   { condition: service_started }
+      files: { condition: service_started }
+
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:
