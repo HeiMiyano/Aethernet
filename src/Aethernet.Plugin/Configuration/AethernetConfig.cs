@@ -43,6 +43,12 @@ public sealed class AethernetConfig : IPluginConfiguration
     // ---- defaults for new pairs ----
     public UserPermissions DefaultPairPermissions { get; set; } = UserPermissions.None;
 
+    // ---- pair nicknames ----
+    /// <summary>Local nicknames the user assigns to paired UIDs so they can identify who's who
+    /// without memorizing UID strings. Purely client-side; never sent to the hub or shown to the
+    /// pair. UID → user-chosen label (max ~32 chars enforced at the UI layer).</summary>
+    public Dictionary<string, string> PairNicknames { get; set; } = new();
+
     // ---- profile ----
     public string? ProfileBio              { get; set; }
     public bool    ProfileIsNsfw           { get; set; }

@@ -21,6 +21,7 @@ public sealed class MainWindow : Window
     private readonly ProfileViewerWindow _profileViewer;
     private readonly GroupAdminWindow _groupAdmin;
     private readonly AethernetConfig _config;
+    private readonly Dalamud.Plugin.IDalamudPluginInterface _pi;
 
     private string _addPairUid = string.Empty;
     private string _joinGroupGid = string.Empty;
@@ -28,15 +29,34 @@ public sealed class MainWindow : Window
     private GroupPasswordDto? _justCreated;
     private DateTime _copyFeedbackUntil = DateTime.MinValue;
 
+    // Nickname-edit modal state. _nicknameEditUid is non-null while the modal is open;
+    // the buffer holds the in-progress text. Both are cleared when the modal is dismissed.
+    private string? _nicknameEditUid;
+    private string  _nicknameBuffer = string.Empty;
+    private const int NicknameMaxLen = 32;
+
     public MainWindow(
         HubConnectionService hub, PairManager pairs, GroupManager groups, VisibleUserManager visible,
-        ProfileViewerWindow profileViewer, GroupAdminWindow groupAdmin, AethernetConfig config)
+        ProfileViewerWindow profileViewer, GroupAdminWindow groupAdmin, AethernetConfig config,
+        Dalamud.Plugin.IDalamudPluginInterface pi)
         : base("Aethernet###Aethernet")
     {
         _hub = hub; _pairs = pairs; _groups = groups; _visible = visible;
-        _profileViewer = profileViewer; _groupAdmin = groupAdmin; _config = config;
+        _profileViewer = profileViewer; _groupAdmin = groupAdmin; _config = config; _pi = pi;
         Size = new Vector2(420, 560);
         SizeCondition = ImGuiCond.FirstUseEver;
+    }
+
+    /// <summary>Resolves the user-visible display name for a pair, preferring (in order):
+    /// local nickname → server-side alias → UID. Used both as the pair-list label and for
+    /// alphabetical ordering so nicknamed pairs sort by nickname, not by UID.</summary>
+    private string DisplayNameFor(PairEntry p)
+    {
+        if (_config.PairNicknames.TryGetValue(p.Pair.User.UID, out var nick) && !string.IsNullOrWhiteSpace(nick))
+            return nick;
+        if (!string.IsNullOrWhiteSpace(p.Pair.User.Alias))
+            return p.Pair.User.Alias;
+        return p.Pair.User.UID;
     }
 
     public override void Draw()
@@ -50,6 +70,57 @@ public sealed class MainWindow : Window
             if (ImGui.BeginTabItem("Groups"))  { DrawGroupsTab(); ImGui.EndTabItem(); }
             if (ImGui.BeginTabItem("About"))   { DrawAboutTab();  ImGui.EndTabItem(); }
             ImGui.EndTabBar();
+        }
+
+        DrawNicknameEditor();
+    }
+
+    /// <summary>Modal popup shown when the user picks "Set nickname…" from a pair's context menu.
+    /// Opens once when _nicknameEditUid transitions from null → non-null; closes on Save or Cancel,
+    /// at which point _nicknameEditUid is cleared back to null.</summary>
+    private void DrawNicknameEditor()
+    {
+        if (_nicknameEditUid is null) return;
+
+        // OpenPopup is idempotent — calling it every frame while the popup is "open" is fine.
+        // We use it to trigger the modal once when _nicknameEditUid first becomes non-null.
+        ImGui.OpenPopup("Set nickname##NicknameModal");
+
+        var open = true;
+        if (ImGui.BeginPopupModal("Set nickname##NicknameModal", ref open, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.TextWrapped($"Local nickname for {_nicknameEditUid} — only visible to you.");
+            ImGui.Spacing();
+            ImGui.InputText("##nicknameInput", ref _nicknameBuffer, NicknameMaxLen);
+            ImGui.Spacing();
+
+            if (ImGui.Button("Save"))
+            {
+                var trimmed = _nicknameBuffer.Trim();
+                if (string.IsNullOrEmpty(trimmed))
+                    _config.PairNicknames.Remove(_nicknameEditUid);
+                else
+                    _config.PairNicknames[_nicknameEditUid] = trimmed;
+                _pi.SavePluginConfig(_config);
+                _nicknameEditUid = null;
+                _nicknameBuffer  = string.Empty;
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel"))
+            {
+                _nicknameEditUid = null;
+                _nicknameBuffer  = string.Empty;
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
+        }
+
+        // The user dismissed via the close (X) button — reset our state.
+        if (!open)
+        {
+            _nicknameEditUid = null;
+            _nicknameBuffer  = string.Empty;
         }
     }
 
@@ -100,7 +171,7 @@ public sealed class MainWindow : Window
         ImGui.Spacing();
         if (!ImGui.BeginChild("##pair_list", new Vector2(0, -1), true)) { ImGui.EndChild(); return; }
 
-        foreach (var p in _pairs.All.OrderByDescending(p => p.IsOnline).ThenBy(p => p.Pair.User.ToString()))
+        foreach (var p in _pairs.All.OrderByDescending(p => p.IsOnline).ThenBy(p => DisplayNameFor(p)))
         {
             var visible = _visible.IsVisible(p.Pair.User.UID);
             var dotColor = visible ? new Vector4(0.20f, 0.78f, 0.35f, 1f)
@@ -109,7 +180,7 @@ public sealed class MainWindow : Window
             ImGui.TextColored(dotColor, "●");
             ImGui.SameLine();
 
-            var label = p.Pair.User.ToString();
+            var label = DisplayNameFor(p);
             if (p.Pair.IndividualPairStatus == IndividualPairStatus.OneSided) label += " (pending)";
             if (p.Pair.OwnPermissions.HasFlag(UserPermissions.Paused))        label += " [paused]";
             ImGui.TextUnformatted(label);
@@ -117,8 +188,13 @@ public sealed class MainWindow : Window
             if (ImGui.IsItemHovered())
             {
                 ImGui.BeginTooltip();
+                // Tooltip always shows the real UID + alias so users can copy/share them.
+                // The pair-list label may show a local nickname (resolved by DisplayNameFor),
+                // so the tooltip is where to look for the canonical identifiers.
                 ImGui.TextUnformatted(p.Pair.User.UID);
                 if (!string.IsNullOrEmpty(p.Pair.User.Alias)) ImGui.TextDisabled($"alias: {p.Pair.User.Alias}");
+                if (_config.PairNicknames.TryGetValue(p.Pair.User.UID, out var nick) && !string.IsNullOrEmpty(nick))
+                    ImGui.TextDisabled($"nickname: {nick}");
                 ImGui.TextDisabled(visible ? "Visible nearby" : p.IsOnline ? "Online" : "Offline");
                 if (p.Pair.SharedGroups.Count > 0)
                     ImGui.TextDisabled($"shared groups: {string.Join(", ", p.Pair.SharedGroups)}");
@@ -138,6 +214,23 @@ public sealed class MainWindow : Window
                 if (ImGui.MenuItem("View profile"))    _profileViewer.Show(p.Pair.User);
                 if (ImGui.MenuItem("Request data"))
                     _ = _hub.InvokeAsync(HubMethods.Server.UserRequestCharacterData, p.Pair.User);
+                ImGui.Separator();
+
+                // Set / clear local nickname. Seeds the modal buffer with the current nickname
+                // so the user can edit it; an empty buffer on Save removes the nickname entirely.
+                var hasNick = _config.PairNicknames.TryGetValue(p.Pair.User.UID, out var existingNick);
+                if (ImGui.MenuItem(hasNick ? "Edit nickname…" : "Set nickname…"))
+                {
+                    _nicknameEditUid = p.Pair.User.UID;
+                    _nicknameBuffer  = existingNick ?? string.Empty;
+                    ImGui.CloseCurrentPopup();
+                }
+                if (hasNick && ImGui.MenuItem("Clear nickname"))
+                {
+                    _config.PairNicknames.Remove(p.Pair.User.UID);
+                    _pi.SavePluginConfig(_config);
+                }
+
                 ImGui.Separator();
                 var paused = p.Pair.OwnPermissions.HasFlag(UserPermissions.Paused);
                 if (ImGui.MenuItem(paused ? "Resume" : "Pause"))

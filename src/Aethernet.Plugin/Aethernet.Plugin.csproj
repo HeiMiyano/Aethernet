@@ -16,7 +16,7 @@
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
     <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
     <Version>0.1.0</Version>
-    <Description>Aethernet — a Mare Synchronos replacement. Syncs Penumbra mods and Glamourer state between paired FFXIV players.</Description>
+    <Description>Aethernet — syncs Penumbra mods, Glamourer state, and related character-customization plugins between paired FFXIV players.</Description>
   </PropertyGroup>
 
   <!-- Dalamud SDK references — these live in %AppData%\XIVLauncher\addon\Hooks\dev on every Dalamud dev install. -->

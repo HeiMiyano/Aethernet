@@ -134,8 +134,8 @@ public sealed class GlamourerIpc : IDisposable
         // Reflected against Glamourer.Api 1.6.1.7:
         //   GlamourerApiEc Invoke(string base64State, int objectIndex, uint key, ApplyFlag flags)
         // ApplyFlag (ulong bitmask): Once=1, Equipment=2, Customization=4, Lock=8.
-        // Use StateDefault = 14 (Equipment | Customization | Lock) — what Mare uses to fully
-        // apply a synced design and prevent the local Glamourer auto-design from overwriting it.
+        // Use StateDefault = 14 (Equipment | Customization | Lock) — fully apply a synced
+        // design AND lock it so the local Glamourer auto-design doesn't immediately overwrite.
         // Passing 0 (which the previous version did) applies neither Equipment nor Customization.
         const ulong ApplyFlagsStateDefault = 14ul;
         var attempts = new (string Shape, Func<Action<string, int>> Build)[]

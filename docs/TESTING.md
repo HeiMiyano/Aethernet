@@ -201,4 +201,4 @@ Then re-test the file-server endpoints — `/files/has` should now include the f
 - Nameplate markers reflect visibility state.
 - Killing the hub mid-session causes a red banner; restarting it goes back to green automatically.
 
-If all of the above pass, you have a working Mare-equivalent end to end.
+If all of the above pass, Aethernet is working end to end.

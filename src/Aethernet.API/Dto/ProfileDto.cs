@@ -2,7 +2,7 @@ using MessagePack;
 
 namespace Aethernet.API.Dto;
 
-/// <summary>Public profile shown to paired users (Mare-style bio + picture).</summary>
+/// <summary>Public profile shown to paired users — bio + picture, with NSFW flag and moderation state.</summary>
 [MessagePackObject(keyAsPropertyName: true)]
 public sealed record UserProfileDto(
     UserDto User,

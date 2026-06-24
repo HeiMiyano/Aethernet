@@ -108,10 +108,10 @@ public sealed class CharacterDataApplier
                     kind, targetIndex, mapping.Count,
                     string.Join(" || ", mapping.Take(2).Select(kv => $"{kv.Key} -> {kv.Value}")));
 
-                // Correct order matches Mare's working pattern: populate the collection's mods
-                // BEFORE assigning it to the actor. Penumbra appears to snapshot the collection
-                // state at assignment time, so adding mods after assign means the actor sees an
-                // empty collection.
+                // Critical order: populate the collection's mods BEFORE assigning it to the
+                // actor. Penumbra snapshots the collection state at assignment time, so adding
+                // mods after assign means the actor sees an empty collection — no replacements
+                // apply, even though AddTemporaryMod returns Success.
                 var tag = $"aethernet:{uid}:{kind}";
                 _penumbra.AddTemporaryMod(tag, collection, mapping, appearance.ManipulationData ?? "", priority: 0);
                 _penumbra.AssignTemporaryCollection(collection, targetIndex);

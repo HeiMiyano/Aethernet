@@ -3,16 +3,15 @@
   "Name": "Aethernet",
   "InternalName": "Aethernet",
   "AssemblyVersion": "0.1.10.0",
-  "Description": "Synchronize Penumbra mods, Glamourer state, Customize+, Honorific, SimpleHeels, Moodles and Pet Names between paired players. A clean-room replacement for Mare Synchronos.",
+  "Description": "Synchronize Penumbra mods, Glamourer state, Customize+, Honorific, SimpleHeels, Moodles and Pet Names between paired players.",
   "ApplicableVersion": "any",
   "Tags": [
     "mods",
     "penumbra",
     "glamourer",
-    "mare",
     "sync"
   ],
   "RepoUrl": "https://github.com/HeiMiyano/Aethernet",
   "IconUrl": "",
-  "Punchline": "Mod synchronization, rebuilt."
+  "Punchline": "Mod synchronization between paired players."
 }

@@ -5,8 +5,8 @@ namespace Aethernet.Shared.Hashing;
 
 /// <summary>
 /// SHA-1 helpers — used everywhere we hash mod-file bytes (Penumbra file replacements).
-/// SHA-1 is fine here because we're not relying on it for security, only content-addressing
-/// (matching Mare's convention so file paths are recognizable in dumps and logs).
+/// SHA-1 is fine here because we're not relying on it for security, only content-addressing —
+/// two files with the same bytes get the same hash, which is the only property we need.
 /// </summary>
 public static class Sha1Helper
 {
