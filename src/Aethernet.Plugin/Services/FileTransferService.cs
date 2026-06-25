@@ -34,6 +34,15 @@ public sealed class FileTransferService : IDisposable
     public IReadOnlyDictionary<string, UidDownloadProgress> PerUidDownloads => _perUid;
     public event Action<string>? UidDownloadChanged;  // arg = uid
 
+    /// <summary>Aggregated upload progress for the LOCAL player (we only ever push our own data).
+    /// Null when no upload is in flight. The in-world overlay reads this to draw a single bar
+    /// over the local character while a push is mid-flight. Granularity is per-file (we update
+    /// BytesDone += fileSize on each successful upload) rather than per-byte — adequate for a
+    /// status display and avoids wrapping every StreamContent in a counting decorator.</summary>
+    private SelfUploadProgress? _selfUpload;
+    public SelfUploadProgress? SelfUpload => Volatile.Read(ref _selfUpload);
+    public event Action? SelfUploadChanged;
+
     public FileTransferService(AethernetConfig config, FileCacheService cache, ILogger<FileTransferService> log)
     {
         _config = config; _cache = cache; _log = log;
@@ -74,14 +83,44 @@ public sealed class FileTransferService : IDisposable
         var missing = await WhichAreMissingAsync(hashToPath.Keys.ToList(), ct);
         if (missing.Missing.Count == 0) return;
 
-        var sem = new SemaphoreSlim(_config.MaxParallelUploads);
-        var tasks = missing.Missing.Select(async hash =>
+        // Pre-compute the total bytes we're about to upload so the overlay shows real totals
+        // from the first frame instead of growing as each file starts. FileInfo.Length is cheap
+        // and we already have the local paths in hand.
+        long totalBytes = 0;
+        foreach (var h in missing.Missing)
         {
-            await sem.WaitAsync(ct);
-            try { await UploadOneAsync(hash, hashToPath[hash], ct); }
-            finally { sem.Release(); }
+            if (hashToPath.TryGetValue(h, out var path))
+            {
+                try { totalBytes += new FileInfo(path).Length; } catch { /* file vanished — ignore */ }
+            }
+        }
+        Volatile.Write(ref _selfUpload, new SelfUploadProgress
+        {
+            FilesTotal = missing.Missing.Count,
+            FilesDone  = 0,
+            BytesTotal = totalBytes,
+            BytesDone  = 0,
+            StartedAt  = DateTime.UtcNow,
         });
-        await Task.WhenAll(tasks);
+        SelfUploadChanged?.Invoke();
+
+        try
+        {
+            var sem = new SemaphoreSlim(_config.MaxParallelUploads);
+            var tasks = missing.Missing.Select(async hash =>
+            {
+                await sem.WaitAsync(ct);
+                try { await UploadOneAsync(hash, hashToPath[hash], ct); }
+                finally { sem.Release(); }
+            });
+            await Task.WhenAll(tasks);
+        }
+        finally
+        {
+            // Always clear, even on error, so a half-finished bar doesn't linger forever.
+            Volatile.Write(ref _selfUpload, null);
+            SelfUploadChanged?.Invoke();
+        }
     }
 
     private async Task UploadOneAsync(string hash, string path, CancellationToken ct)
@@ -107,6 +146,18 @@ public sealed class FileTransferService : IDisposable
             resp.EnsureSuccessStatusCode();
             p.BytesTransferred = info.Length;
             ProgressChanged?.Invoke(p);
+
+            // Update the aggregated self-upload progress so the overlay advances. We do this
+            // only on success — a failed upload doesn't move BytesDone forward. The progress
+            // struct may be null (e.g. someone called UploadOneAsync outside the wrapper) so
+            // guard against the race where SelfUpload was cleared mid-batch.
+            var agg = Volatile.Read(ref _selfUpload);
+            if (agg is not null)
+            {
+                Interlocked.Add(ref agg.BytesDone, info.Length);
+                Interlocked.Increment(ref agg.FilesDone);
+                SelfUploadChanged?.Invoke();
+            }
         }
         finally
         {
@@ -258,4 +309,20 @@ public sealed class UidDownloadProgress
     public long BytesTotal;
     public long BytesDone;
     public double Fraction => BytesTotal <= 0 ? 0 : Math.Min(1.0, BytesDone / (double)BytesTotal);
+}
+
+/// <summary>
+/// Aggregated progress for the LOCAL player's outbound upload of mod files. Updated at
+/// file-level granularity (one BytesDone += fileSize tick per successful upload) rather than
+/// per-byte, which is plenty for a status display and avoids wrapping every StreamContent in
+/// a counting decorator. StartedAt is exposed so the UI can show elapsed time.
+/// </summary>
+public sealed class SelfUploadProgress
+{
+    public int      FilesTotal;
+    public int      FilesDone;
+    public long     BytesTotal;
+    public long     BytesDone;
+    public DateTime StartedAt;
+    public double   Fraction => BytesTotal <= 0 ? 0 : Math.Min(1.0, BytesDone / (double)BytesTotal);
 }

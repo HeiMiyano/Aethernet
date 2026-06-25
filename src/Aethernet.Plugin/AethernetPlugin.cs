@@ -90,11 +90,13 @@ public sealed class AethernetPlugin : IDalamudPlugin
         services.AddSingleton<UiBootstrapper>();
         services.AddSingleton<ThemeApplier>();
         services.AddSingleton<DownloadOverlay>();
+        services.AddSingleton<UploadOverlay>();
 
         _services = services.BuildServiceProvider();
 
         _services.GetRequiredService<UiBootstrapper>().Initialize();
         _services.GetRequiredService<DownloadOverlay>().Initialize();
+        _services.GetRequiredService<UploadOverlay>().Initialize();
 
         // Eagerly instantiate long-lived background services so their constructor-time event
         // subscriptions take effect immediately.
