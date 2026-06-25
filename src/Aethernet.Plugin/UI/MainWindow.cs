@@ -55,6 +55,18 @@ public sealed class MainWindow : Window
         SizeCondition = ImGuiCond.FirstUseEver;
     }
 
+    /// <summary>Maps server-side short error codes (HubException messages) to user-readable
+    /// copy for the Create-syncshell flow. Anything we haven't catalogued falls through to the
+    /// raw code so issues remain visible during testing rather than being silently swallowed.</summary>
+    private static string TranslateGroupCreateError(string raw) => raw switch
+    {
+        "password_too_short"  => $"Password must be at least {AethernetConstants.MinGroupPasswordLength} characters.",
+        "password_too_long"   => $"Password must be at most {AethernetConstants.MaxGroupPasswordLength} characters.",
+        "group_limit_owned"   => "You've reached the limit of syncshells you can own.",
+        "rate_limited"        => "Slow down — too many syncshell creates. Try again in a minute.",
+        _ => raw.Length > 96 ? raw[..96] : raw,
+    };
+
     /// <summary>Resolves the user-visible display name for a pair, preferring (in order):
     /// local nickname → server-side alias → UID. Used both as the pair-list label and for
     /// alphabetical ordering so nicknamed pairs sort by nickname, not by UID.</summary>
@@ -442,10 +454,12 @@ public sealed class MainWindow : Window
         if (ImGui.Button("Create new syncshell"))
         {
             _createGroupError = null;
+            // Send empty string (NOT null) as the auto-generate sentinel. SignalR + MessagePack
+            // doesn't reliably bind nullable-string positional args; passing null produces an
+            // ArgumentException server-side that gets wrapped into "An unexpected error occurred
+            // invoking 'GroupCreateWithPassword'" — masking the real validation errors.
             var pw = _createGroupPassword.Trim();
-            // Always call GroupCreateWithPassword so the server is the single source of truth
-            // for validation; passing null for blank input keeps the auto-gen path intact.
-            _ = _hub.InvokeAsync<GroupPasswordDto>(HubMethods.Server.GroupCreateWithPassword, string.IsNullOrEmpty(pw) ? null : pw)
+            _ = _hub.InvokeAsync<GroupPasswordDto>(HubMethods.Server.GroupCreateWithPassword, pw)
                 .ContinueWith(t =>
                 {
                     if (t.IsCompletedSuccessfully)
@@ -455,19 +469,18 @@ public sealed class MainWindow : Window
                     }
                     else
                     {
-                        // HubException message bubbles through t.Exception.InnerException.Message;
-                        // we surface only the short reason code (e.g. "password_too_short") to
-                        // avoid leaking server stack frames into the UI.
-                        var msg = t.Exception?.InnerException?.Message ?? "create failed";
-                        _createGroupError = msg.Length > 64 ? msg[..64] : msg;
+                        // HubException message bubbles through t.Exception.InnerException.Message.
+                        // Translate the short reason codes to user-readable copy; fall back to the
+                        // raw message for anything we haven't catalogued yet.
+                        var raw = t.Exception?.InnerException?.Message ?? "create failed";
+                        _createGroupError = TranslateGroupCreateError(raw);
                     }
                 });
         }
+        // Always show the password rules so users know what to type before they hit Create.
+        ImGui.TextDisabled($"Password: blank (auto) or {AethernetConstants.MinGroupPasswordLength}-{AethernetConstants.MaxGroupPasswordLength} characters.");
         if (_createGroupError is not null)
-        {
-            ImGui.SameLine();
             ImGui.TextColored(new Vector4(0.9f, 0.4f, 0.4f, 1f), _createGroupError);
-        }
         if (_justCreated is not null)
         {
             ImGui.TextColored(new Vector4(0.3f, 0.85f, 0.3f, 1f), "Created syncshell — share these with your friends:");

@@ -42,6 +42,11 @@ if (storageMode.Equals("s3", StringComparison.OrdinalIgnoreCase))
             ServiceURL = builder.Configuration["Storage:Endpoint"],
             ForcePathStyle = true,
             AuthenticationRegion = builder.Configuration["Storage:Region"] ?? "us-east-1",
+            // Cloudflare R2 doesn't implement the AWS chunked streaming signature, and recent
+            // AWS SDK builds also try to attach a CRC32 checksum trailer that R2 rejects.
+            // Forcing the signature version to "4" (vs "4a") keeps us on plain SigV4, and
+            // we disable payload signing per-request in S3BlobStore.PutAsync.
+            SignatureVersion = "4",
         }));
     builder.Services.AddSingleton<IBlobStore, S3BlobStore>();
 }

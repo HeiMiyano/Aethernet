@@ -28,6 +28,13 @@ public sealed class S3BlobStore : IBlobStore
             InputStream = content,
             AutoCloseStream = false,
             ContentType = contentType ?? "application/octet-stream",
+            // Cloudflare R2 does NOT implement the AWS chunked streaming signature
+            // ("STREAMING-AWS4-HMAC-SHA256-PAYLOAD") that the SDK reaches for whenever the
+            // input stream's length is unknown. Force single-shot SigV4 with UNSIGNED-PAYLOAD,
+            // which R2 accepts. Auth still happens via the request signature on headers; only
+            // the body payload itself becomes unsigned. This is the upstream-recommended R2
+            // workaround. See: https://developers.cloudflare.com/r2/api/s3/api/#implemented-object-level-operations
+            DisablePayloadSigning = true,
         };
         var resp = await _s3.PutObjectAsync(put, ct);
         return resp.ContentLength;

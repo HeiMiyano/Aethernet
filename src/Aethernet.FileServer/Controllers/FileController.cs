@@ -44,6 +44,14 @@ public sealed class FileController : ControllerBase
         catch (InvalidOperationException e) when (e.Message == "hash_mismatch")    { return BadRequest("hash_mismatch"); }
         catch (InvalidOperationException e) when (e.Message == "too_large")        { return StatusCode(413, "too_large"); }
         catch (InvalidOperationException e) when (e.Message == "quota_exceeded")   { return StatusCode(507, "quota_exceeded"); }
+        // Surface storage-backend failures with a short, log-friendly reason instead of an
+        // opaque 500 with no body. Without this catch any AWS/R2-side error (signing mismatch,
+        // bucket missing, credentials expired) lands in the unhandled-exception path and
+        // costs us a full server-log dive to identify. 502 = "we tried, our upstream broke".
+        catch (Amazon.S3.AmazonS3Exception e)
+        {
+            return StatusCode(502, $"storage_error: {e.ErrorCode ?? "unknown"} — {e.Message}");
+        }
     }
 
     [HttpGet("{hash}")]
