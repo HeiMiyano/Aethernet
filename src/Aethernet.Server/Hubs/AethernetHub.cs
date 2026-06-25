@@ -338,6 +338,14 @@ public sealed class AethernetHub : Hub<IAethernetHubClient>
         if (!_ratelimit.TryConsume($"groupcreate:{Uid}", maxPerMinute: 3)) throw new HubException("rate_limited");
         return _groups.CreateAsync(Uid);
     }
+    /// <summary>Create a syncshell with a user-supplied password. Pass null or whitespace to
+    /// auto-generate (equivalent to <see cref="GroupCreate"/>). Shares the same rate-limit
+    /// bucket as <c>GroupCreate</c> so users can't bypass the limit by alternating methods.</summary>
+    public Task<GroupPasswordDto> GroupCreateWithPassword(string? password)
+    {
+        if (!_ratelimit.TryConsume($"groupcreate:{Uid}", maxPerMinute: 3)) throw new HubException("rate_limited");
+        return _groups.CreateAsync(Uid, password);
+    }
     public Task<GroupFullInfoDto> GroupJoin(GroupPasswordDto join)
     {
         if (!_ratelimit.TryConsume($"groupjoin:{Uid}", maxPerMinute: 10)) throw new HubException("rate_limited");

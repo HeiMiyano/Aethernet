@@ -36,6 +36,7 @@ public static class HubMethods
 
         // --- groups (syncshells) ---
         public const string GroupCreate              = "GroupCreate";
+        public const string GroupCreateWithPassword  = "GroupCreateWithPassword";
         public const string GroupJoin                = "GroupJoin";
         public const string GroupLeave               = "GroupLeave";
         public const string GroupDelete              = "GroupDelete";

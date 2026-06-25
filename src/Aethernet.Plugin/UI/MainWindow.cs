@@ -29,6 +29,14 @@ public sealed class MainWindow : Window
     private GroupPasswordDto? _justCreated;
     private DateTime _copyFeedbackUntil = DateTime.MinValue;
 
+    // Custom-password buffer for the "Create new syncshell" flow. Blank ⇒ server auto-generates.
+    private string _createGroupPassword = string.Empty;
+    // Most recent server error (e.g. "password_too_short") shown next to the Create button.
+    private string? _createGroupError;
+    // Which copy button most recently fired, so the inline "Copied!" toast renders next to the
+    // right button. Cleared on timeout (see _copyFeedbackUntil).
+    private string? _lastCopyKey;
+
     // Nickname-edit modal state. _nicknameEditUid is non-null while the modal is open;
     // the buffer holds the in-progress text. Both are cleared when the modal is dismissed.
     private string? _nicknameEditUid;
@@ -425,16 +433,97 @@ public sealed class MainWindow : Window
 
     private void DrawGroupsTab()
     {
+        // Optional custom password — blank means the server auto-generates one (legacy behavior).
+        // Width clamp keeps the input from blowing out the rest of the row in a narrow window.
+        ImGui.PushItemWidth(180f);
+        ImGui.InputTextWithHint("##create_group_pw", "password (blank = auto)", ref _createGroupPassword, 128);
+        ImGui.PopItemWidth();
+        ImGui.SameLine();
         if (ImGui.Button("Create new syncshell"))
         {
-            _ = _hub.InvokeAsync<GroupPasswordDto>(HubMethods.Server.GroupCreate)
-                .ContinueWith(t => { if (t.IsCompletedSuccessfully) _justCreated = t.Result; });
+            _createGroupError = null;
+            var pw = _createGroupPassword.Trim();
+            // Always call GroupCreateWithPassword so the server is the single source of truth
+            // for validation; passing null for blank input keeps the auto-gen path intact.
+            _ = _hub.InvokeAsync<GroupPasswordDto>(HubMethods.Server.GroupCreateWithPassword, string.IsNullOrEmpty(pw) ? null : pw)
+                .ContinueWith(t =>
+                {
+                    if (t.IsCompletedSuccessfully)
+                    {
+                        _justCreated = t.Result;
+                        _createGroupPassword = string.Empty;
+                    }
+                    else
+                    {
+                        // HubException message bubbles through t.Exception.InnerException.Message;
+                        // we surface only the short reason code (e.g. "password_too_short") to
+                        // avoid leaking server stack frames into the UI.
+                        var msg = t.Exception?.InnerException?.Message ?? "create failed";
+                        _createGroupError = msg.Length > 64 ? msg[..64] : msg;
+                    }
+                });
+        }
+        if (_createGroupError is not null)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.9f, 0.4f, 0.4f, 1f), _createGroupError);
         }
         if (_justCreated is not null)
         {
+            ImGui.TextColored(new Vector4(0.3f, 0.85f, 0.3f, 1f), "Created syncshell — share these with your friends:");
+
+            ImGui.AlignTextToFramePadding();
+            ImGui.Text("ID:");
             ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.3f, 0.85f, 0.3f, 1f),
-                $"created {_justCreated.Group.GID} pw={_justCreated.Password}");
+            ImGui.TextUnformatted(_justCreated.Group.GID);
+            ImGui.SameLine();
+            if (ImGui.Button("Copy##copy_gid"))
+            {
+                ImGui.SetClipboardText(_justCreated.Group.GID);
+                _copyFeedbackUntil = DateTime.UtcNow.AddSeconds(2);
+                _lastCopyKey = "gid";
+            }
+            if (_lastCopyKey == "gid" && DateTime.UtcNow < _copyFeedbackUntil)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.3f, 0.85f, 0.3f, 1f), "copied!");
+            }
+
+            ImGui.AlignTextToFramePadding();
+            ImGui.Text("Password:");
+            ImGui.SameLine();
+            ImGui.TextUnformatted(_justCreated.Password);
+            ImGui.SameLine();
+            if (ImGui.Button("Copy##copy_pw"))
+            {
+                ImGui.SetClipboardText(_justCreated.Password);
+                _copyFeedbackUntil = DateTime.UtcNow.AddSeconds(2);
+                _lastCopyKey = "pw";
+            }
+            if (_lastCopyKey == "pw" && DateTime.UtcNow < _copyFeedbackUntil)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.3f, 0.85f, 0.3f, 1f), "copied!");
+            }
+
+            // "Copy both" emits the share text on the same line so it lands cleanly into Discord.
+            if (ImGui.Button("Copy both##copy_both"))
+            {
+                ImGui.SetClipboardText($"Aethernet syncshell — ID: {_justCreated.Group.GID}  Password: {_justCreated.Password}");
+                _copyFeedbackUntil = DateTime.UtcNow.AddSeconds(2);
+                _lastCopyKey = "both";
+            }
+            if (_lastCopyKey == "both" && DateTime.UtcNow < _copyFeedbackUntil)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.3f, 0.85f, 0.3f, 1f), "copied!");
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Dismiss##dismiss_created"))
+            {
+                _justCreated = null;
+                _lastCopyKey = null;
+            }
         }
 
         ImGui.Separator();

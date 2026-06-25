@@ -38,4 +38,13 @@ public static class AethernetConstants
 
     /// <summary>Maximum number of users a single group may contain.</summary>
     public const int MaxGroupUsers = 100;
+
+    /// <summary>Minimum length for a user-supplied syncshell password. Auto-generated passwords
+    /// are 12 chars from <see cref="Aethernet.Shared.Identity.UidGenerator.NewGroupPassword"/>;
+    /// we let users go a bit shorter for memorability while still resisting trivial brute force.</summary>
+    public const int MinGroupPasswordLength = 8;
+
+    /// <summary>Upper bound for a user-supplied syncshell password — keeps the hashed-value
+    /// payload bounded and prevents accidental gigantic input from breaking the rate-limit bucket.</summary>
+    public const int MaxGroupPasswordLength = 128;
 }

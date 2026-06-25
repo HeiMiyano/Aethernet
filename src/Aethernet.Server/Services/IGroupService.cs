@@ -4,7 +4,7 @@ namespace Aethernet.Server.Services;
 
 public interface IGroupService
 {
-    Task<GroupPasswordDto>   CreateAsync(string ownerUid);
+    Task<GroupPasswordDto>   CreateAsync(string ownerUid, string? customPassword = null);
     Task<GroupFullInfoDto>   JoinAsync(string uid, GroupPasswordDto join);
     Task                     LeaveAsync(string uid, GroupDto group);
     Task                     DeleteAsync(string uid, GroupDto group);

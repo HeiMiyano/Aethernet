@@ -23,14 +23,31 @@ public sealed class GroupService : IGroupService
         _db = db; _hub = hub; _log = log;
     }
 
-    public async Task<GroupPasswordDto> CreateAsync(string ownerUid)
+    public async Task<GroupPasswordDto> CreateAsync(string ownerUid, string? customPassword = null)
     {
         var ownedCount = await _db.Groups.CountAsync(g => g.OwnerUid == ownerUid);
         if (ownedCount >= AethernetConstants.MaxGroupsOwned)
             throw new HubException("group_limit_owned");
 
+        // If the caller supplied a password, honor it (after validating length); otherwise
+        // generate a random one. We trim incidental whitespace before measuring so the user
+        // doesn't get a "too short" error from a trailing space pasted in from chat.
+        string password;
+        if (!string.IsNullOrWhiteSpace(customPassword))
+        {
+            var trimmed = customPassword.Trim();
+            if (trimmed.Length < AethernetConstants.MinGroupPasswordLength)
+                throw new HubException("password_too_short");
+            if (trimmed.Length > AethernetConstants.MaxGroupPasswordLength)
+                throw new HubException("password_too_long");
+            password = trimmed;
+        }
+        else
+        {
+            password = UidGenerator.NewGroupPassword();
+        }
+
         var gid = UidGenerator.NewGid();
-        var password = UidGenerator.NewGroupPassword();
         var entity = new GroupEntity
         {
             Gid = gid,
