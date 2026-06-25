@@ -19,15 +19,15 @@ public sealed class UploadOverlay : IDisposable
 {
     private readonly IDalamudPluginInterface _pi;
     private readonly IGameGui _gui;
-    private readonly IClientState _clientState;
+    private readonly IObjectTable _objectTable;
     private readonly FileTransferService _transfer;
     private readonly ILogger<UploadOverlay> _log;
 
     public UploadOverlay(
-        IDalamudPluginInterface pi, IGameGui gui, IClientState clientState,
+        IDalamudPluginInterface pi, IGameGui gui, IObjectTable objectTable,
         FileTransferService transfer, ILogger<UploadOverlay> log)
     {
-        _pi = pi; _gui = gui; _clientState = clientState;
+        _pi = pi; _gui = gui; _objectTable = objectTable;
         _transfer = transfer; _log = log;
     }
 
@@ -46,7 +46,9 @@ public sealed class UploadOverlay : IDisposable
         var progress = _transfer.SelfUpload;
         if (progress is null) return;
 
-        var player = _clientState.LocalPlayer;
+        // Object table slot 0 is always the local player when logged in. Cast guards against
+        // the brief startup window when the slot exists but isn't yet a player character.
+        var player = _objectTable[0] as IPlayerCharacter;
         if (player is null) return;
 
         // Anchor a bit higher than the download bar (2.7f vs 2.4f) so that if both upload
