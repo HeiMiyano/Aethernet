@@ -93,6 +93,19 @@ public sealed class FileController : ControllerBase
         }
         catch (FileNotFoundException) { return NotFound(); }
         catch (InvalidOperationException e) when (e.Message == "forbidden") { return StatusCode(451); }
+        // R2 GetObject returns its own AmazonS3Exception (NoSuchKey, AccessDenied, etc) when
+        // the blob isn't there or perms drift; treat NoSuchKey as 404 (matches the DB-row-
+        // missing branch above) and surface everything else as 502 with the code so the
+        // client log shows WHY rather than just "500 Internal Server Error".
+        catch (Amazon.S3.AmazonS3Exception e) when (e.StatusCode == System.Net.HttpStatusCode.NotFound
+                                                 || e.ErrorCode == "NoSuchKey")
+        {
+            return NotFound();
+        }
+        catch (Amazon.S3.AmazonS3Exception e)
+        {
+            return StatusCode(502, $"storage_error: {e.ErrorCode ?? "unknown"} — {e.Message}");
+        }
     }
 
     [HttpDelete("{hash}")]
