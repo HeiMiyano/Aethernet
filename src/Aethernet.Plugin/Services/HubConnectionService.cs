@@ -54,14 +54,36 @@ public sealed class HubConnectionService : IAsyncDisposable
         _pairs = pairs; _groups = groups; _applier = applier;
         _objectTable = objectTable; _clientState = clientState; _framework = framework;
 
-        // Re-publish character ident whenever the player changes zones (which forces a
-        // character re-instantiation — name@world could change if they swapped chars too).
+        // Re-publish character ident on every event that could change what name@world we are
+        // or invalidate the server's record of our ident:
+        //   - TerritoryChanged: character re-instantiation, possible char swap
+        //   - Login: covers the boot path where plugin loads BEFORE the user logs into XIV
+        //     (very common since plugins start with XIVLauncher). Without this hook,
+        //     PublishIdentAsync silently bails because _objectTable[0] is null pre-login,
+        //     and nothing re-runs it after login finishes → blue dot forever.
+        //   - Logout: clear the cached ident so the next login force-publishes even if
+        //     someone re-logs to the same character.
         _clientState.TerritoryChanged += OnTerritoryChangedForIdent;
+        _clientState.Login            += OnLogin;
+        _clientState.Logout           += OnLogout;
     }
 
     private void OnTerritoryChangedForIdent(uint territoryId)
     {
         _ = PublishIdentAsync(force: true);
+    }
+
+    private void OnLogin()
+    {
+        _log.LogInformation("Local player logged in — publishing ident");
+        _lastPublishedIdent = null;  // belt + suspenders: force the publish
+        _ = PublishIdentAsync(force: true);
+    }
+
+    private void OnLogout(int type, int code)
+    {
+        _log.LogInformation("Local player logged out — clearing cached ident");
+        _lastPublishedIdent = null;
     }
 
     /// <summary>
@@ -73,18 +95,38 @@ public sealed class HubConnectionService : IAsyncDisposable
         if (_hub?.State != HubConnectionState.Connected) return;
         try
         {
-            string? ident = await _framework.RunOnTick(() =>
+            // The player object lags Login and TerritoryChanged events by ~500ms, and may not
+            // exist at all if the plugin started pre-login. Retry every 250ms for up to ~10s
+            // to give the object table time to populate before we give up. Without the retry,
+            // an early call here silently bails and nothing re-runs it → blue dot forever
+            // until the user disables/re-enables the plugin.
+            const int MaxAttempts = 40;          // ~10s wall time at 250ms cadence
+            const int DelayMs     = 250;
+            string? ident = null;
+            for (var attempt = 0; attempt < MaxAttempts; attempt++)
             {
-                var local = _objectTable[0] as IPlayerCharacter;
-                if (local is null) return null;
-                return $"{local.Name.TextValue}@{local.HomeWorld.RowId}";
-            }, cancellationToken: _cts.Token).ConfigureAwait(false);
-            if (string.IsNullOrEmpty(ident)) return;
+                ident = await _framework.RunOnTick(() =>
+                {
+                    var local = _objectTable[0] as IPlayerCharacter;
+                    return local is null ? null : $"{local.Name.TextValue}@{local.HomeWorld.RowId}";
+                }, cancellationToken: _cts.Token).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(ident)) break;
+                // If we're not even logged in, no point waiting for an object table that
+                // can't possibly populate. Login event will re-call us.
+                if (!_clientState.IsLoggedIn) return;
+                await Task.Delay(DelayMs, _cts.Token);
+            }
+            if (string.IsNullOrEmpty(ident))
+            {
+                _log.LogWarning("PublishIdent: gave up after {Attempts} retries — local player still unavailable", MaxAttempts);
+                return;
+            }
             if (!force && ident == _lastPublishedIdent) return;
             await _hub.InvokeAsync(HubMethods.Server.UserSetIdent, ident, _cts.Token);
             _lastPublishedIdent = ident;
             _log.LogInformation("Published character ident: {Ident}", ident);
         }
+        catch (OperationCanceledException) { /* shutting down — quiet */ }
         catch (Exception ex)
         {
             _log.LogWarning("PublishIdent failed: {Msg}", ex.Message);
@@ -118,9 +160,24 @@ public sealed class HubConnectionService : IAsyncDisposable
 
             RegisterClientHandlers(_hub);
 
-            _hub.Reconnecting += _ => { Notify(HubConnectionState.Reconnecting); return Task.CompletedTask; };
-            _hub.Reconnected  += _ => { Notify(HubConnectionState.Connected);    return Task.CompletedTask; };
-            _hub.Closed       += _ => { Notify(HubConnectionState.Disconnected); return Task.CompletedTask; };
+            // NOTE: lambda params are named (not `_`) so we can still use `_` as a discard
+            // inside the body. SignalR's Reconnected/Reconnecting params are string? (the
+            // connection id); naming them `_` shadows the discard and `_ = SomeTaskCall()`
+            // becomes a Task→string assignment that won't compile. Same shape as the
+            // OnFrameworkTick(IFramework _) trap.
+            _hub.Reconnecting += _ex => { Notify(HubConnectionState.Reconnecting); return Task.CompletedTask; };
+            _hub.Reconnected  += _newId =>
+            {
+                Notify(HubConnectionState.Connected);
+                // Server forgot our ident (and our online status) during the disconnect — must
+                // re-publish so paired clients see us back. Without this, automatic reconnects
+                // (transient network blips, server restarts) leave us "online but unidentified"
+                // on the receiver side — same blue-dot symptom as the initial-login race.
+                _lastPublishedIdent = null;
+                _ = PublishIdentAsync(force: true);
+                return Task.CompletedTask;
+            };
+            _hub.Closed       += _ex => { Notify(HubConnectionState.Disconnected); return Task.CompletedTask; };
 
             await _hub.StartAsync(_cts.Token);
             Notify(HubConnectionState.Connected);
@@ -224,6 +281,11 @@ public sealed class HubConnectionService : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // Unhook the IClientState event handlers we attached in the constructor; Dalamud holds
+        // them indefinitely otherwise and the next plugin load gets a duplicate subscription.
+        _clientState.TerritoryChanged -= OnTerritoryChangedForIdent;
+        _clientState.Login            -= OnLogin;
+        _clientState.Logout           -= OnLogout;
         _cts.Cancel();
         if (_hub is not null) await _hub.DisposeAsync();
         _http.Dispose();
