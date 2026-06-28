@@ -189,6 +189,13 @@ public sealed class HubConnectionService : IAsyncDisposable
 
             // Publish our character ident so paired clients can spot us in their object tables.
             _ = PublishIdentAsync(force: true);
+
+            // Safety-net: periodic re-sync of online-pair state. The initial UserGetOnlinePairs
+            // + the server's Client_UserSendOnline broadcasts cover the happy path, but races
+            // (broadcast arrives before our pair list, server presence eventually-consistent
+            // across pod restarts, etc.) can leave a pair stuck in a wrong state until BOTH
+            // sides bounce the plugin. Re-fetching every 30s caps the worst-case staleness.
+            _ = RunOnlinePairsPollerAsync(_cts.Token);
         }
         catch (Exception ex)
         {
@@ -208,6 +215,36 @@ public sealed class HubConnectionService : IAsyncDisposable
     /// <summary>Convenience proxy — kept thin so call-sites stay readable.</summary>
     public Task<T> InvokeAsync<T>(string method, params object?[] args)
         => _hub?.InvokeCoreAsync<T>(method, args, _cts.Token) ?? throw new InvalidOperationException("not_connected");
+
+    /// <summary>Background loop: every 30s, re-query the server's idea of which paired users
+    /// are online and reconcile with our local PairManager. This is the safety net for any
+    /// missed Client_UserSendOnline broadcast (race at connect, transient server-side
+    /// presence inconsistency, etc.) so a paired user never gets stuck looking offline when
+    /// they're actually online. Exits cleanly when _cts is cancelled (plugin shutdown).</summary>
+    private async Task RunOnlinePairsPollerAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+                if (_hub?.State != HubConnectionState.Connected) continue;
+                try
+                {
+                    var snapshot = await _hub.InvokeAsync<List<OnlineUserIdentDto>>(
+                        HubMethods.Server.UserGetOnlinePairs, ct).ConfigureAwait(false);
+                    _pairs.SetOnline(snapshot);
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex)
+                {
+                    // Don't crash the loop on a single bad call — log and try again next tick.
+                    _log.LogDebug("Online-pairs poller hiccup: {Msg}", ex.Message);
+                }
+            }
+        }
+        catch (OperationCanceledException) { /* shutdown */ }
+    }
 
     public Task InvokeAsync(string method, params object?[] args)
         => _hub?.InvokeCoreAsync(method, args, _cts.Token) ?? throw new InvalidOperationException("not_connected");
