@@ -42,6 +42,10 @@ services:
       # Optional: leave blank to disable Discord OAuth.
       Discord__ClientId:     ${DISCORD_CLIENT_ID:-}
       Discord__ClientSecret: ${DISCORD_CLIENT_SECRET:-}
+      # Admin moderation dashboard (served by the hub) calls /auth/login
+      # cross-origin from its own URL — needs to be allow-listed here. Leave
+      # blank to leave the dashboard's login broken (CORS-rejected).
+      Cors__AllowedOrigins: ${ADMIN_DASHBOARD_ORIGIN:-}
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -58,6 +62,10 @@ services:
       Jwt__Issuer:     ${JWT_ISSUER:-aethernet-auth}
       Jwt__Audience:   ${JWT_AUDIENCE:-aethernet-hub}
       Motd:            ${MOTD:-Welcome to Aethernet.}
+      # Public base URL of the auth service, so the admin dashboard
+      # (served at /admin/dashboard on this service) knows where to
+      # POST its login call. Leave blank to disable the dashboard's login.
+      Admin__AuthBaseUrl: ${AUTH_PUBLIC_URL:-}
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_started }
@@ -95,7 +103,7 @@ services:
     profiles: ["discord"]
     environment:
       ConnectionStrings__Default: "Host=postgres;Database=aethernet;Username=aethernet;Password=${POSTGRES_PASSWORD}"
-      Discord__BotToken: ${DISCORD_BOT_TOKEN:?DISCORD_BOT_TOKEN must be set in .env to use the discord profile}
+      Discord__BotToken: ${DISCORD_BOT_TOKEN:-}
       Discord__GuildId:  ${DISCORD_GUILD_ID:-}
     depends_on:
       postgres: { condition: service_healthy }
