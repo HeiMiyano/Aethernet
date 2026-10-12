@@ -58,6 +58,16 @@ public sealed class CharacterDataApplier
         if (_lastApplied.TryGetValue(uid, out var lastVer) && lastVer >= data.DataVersion) return;
         if (!_pairs.TryGet(uid, out var pair)) { _log.LogDebug("ignoring data from unpaired {Uid}", uid); return; }
 
+        // "Pause sync with this pair" is documented (see PairResolver) as a local-only, apply-side
+        // gate — the hub keeps pushing regardless so un-pausing doesn't need a full resync. Honor
+        // that here; previously this flag was stored/displayed but never actually checked, so
+        // pausing a pair had no real effect on what got applied.
+        if (pair.Pair.OwnPermissions.HasFlag(UserPermissions.Paused))
+        {
+            _log.LogDebug("skipping apply from {Uid}: pair is paused", uid);
+            return;
+        }
+
         data = ApplyLocalPermissions(data, pair.Pair.OwnPermissions);
 
         var visible = _visible.Get(uid);
@@ -83,55 +93,69 @@ public sealed class CharacterDataApplier
                 _log.LogWarning("  missing hash {Hash} -> {Path}", h, _cache.GetPath(h));
         }
 
-        await _framework.RunOnTick(() =>
+        // From here on we're past file transfer and into Penumbra/IPC application + redraws,
+        // which has no per-file progress of its own. DownloadManyAsync already tore down (or,
+        // when every file was already cached, never created) the per-UID progress entry that
+        // drives the overlay/status window, so without this the bar would just vanish here even
+        // though applying a big outfit or a busy syncshell pair can still take a visible moment.
+        // BeginApplying/EndApplying keep something on screen through that gap.
+        _transfer.BeginApplying(uid);
+        try
         {
-            var collection = _collections.GetOrAdd(uid, _ => _penumbra.CreateTemporaryCollection($"aethernet:{uid}"));
-            if (collection == Guid.Empty) { _log.LogWarning("could not create Penumbra collection for {Uid}", uid); return; }
-            _log.LogInformation("Using collection {Coll} for {Uid}", collection, uid);
-
-            foreach (var (kind, appearance) in data.Appearances)
+            await _framework.RunOnTick(() =>
             {
-                var targetIndex = ResolveActorIndex(visible, kind);
-                if (targetIndex < 0) { _log.LogWarning("  kind={Kind} skipped: no target index", kind); continue; }
+                var collection = _collections.GetOrAdd(uid, _ => _penumbra.CreateTemporaryCollection($"aethernet:{uid}"));
+                if (collection == Guid.Empty) { _log.LogWarning("could not create Penumbra collection for {Uid}", uid); return; }
+                _log.LogInformation("Using collection {Coll} for {Uid}", collection, uid);
 
-                // Penumbra requires the replacement file's extension to match the game path's
-                // extension. _cache.GetPath(hash, gamePath) hardlinks to an extensioned twin on
-                // first use so Penumbra accepts the replacement.
-                var mapping = appearance.FileReplacements.ToDictionary(
-                    kv => kv.Key,
-                    kv => _cache.GetPath(kv.Value, kv.Key),
-                    StringComparer.Ordinal);
-                foreach (var (src, dst) in appearance.FileSwaps)
-                    mapping[src] = dst;
+                foreach (var (kind, appearance) in data.Appearances)
+                {
+                    var targetIndex = ResolveActorIndex(visible, kind);
+                    if (targetIndex < 0) { _log.LogWarning("  kind={Kind} skipped: no target index", kind); continue; }
 
-                _log.LogInformation("  kind={Kind} targetIdx={Idx} replacements={Cnt} | sample: {Sample}",
-                    kind, targetIndex, mapping.Count,
-                    string.Join(" || ", mapping.Take(2).Select(kv => $"{kv.Key} -> {kv.Value}")));
+                    // Penumbra requires the replacement file's extension to match the game path's
+                    // extension. _cache.GetPath(hash, gamePath) hardlinks to an extensioned twin on
+                    // first use so Penumbra accepts the replacement.
+                    var mapping = appearance.FileReplacements.ToDictionary(
+                        kv => kv.Key,
+                        kv => _cache.GetPath(kv.Value, kv.Key),
+                        StringComparer.Ordinal);
+                    foreach (var (src, dst) in appearance.FileSwaps)
+                        mapping[src] = dst;
 
-                // Critical order: populate the collection's mods BEFORE assigning it to the
-                // actor. Penumbra snapshots the collection state at assignment time, so adding
-                // mods after assign means the actor sees an empty collection — no replacements
-                // apply, even though AddTemporaryMod returns Success.
-                var tag = $"aethernet:{uid}:{kind}";
-                _penumbra.AddTemporaryMod(tag, collection, mapping, appearance.ManipulationData ?? "", priority: 0);
-                _penumbra.AssignTemporaryCollection(collection, targetIndex);
-            }
+                    _log.LogInformation("  kind={Kind} targetIdx={Idx} replacements={Cnt} | sample: {Sample}",
+                        kind, targetIndex, mapping.Count,
+                        string.Join(" || ", mapping.Take(2).Select(kv => $"{kv.Key} -> {kv.Value}")));
 
-            if (data.GlamourerData     is not null && _glamourer.IsAvailable) _glamourer.ApplyState(data.GlamourerData, visible.ObjectIndex);
-            if (data.CustomizePlusData is not null && _customize.IsAvailable) _customize.ApplyProfile(visible.ObjectIndex, data.CustomizePlusData);
-            if (data.HonorificTitle    is not null && _honorific.IsAvailable) _honorific.ApplyTitle(visible.ObjectIndex, data.HonorificTitle);
-            if (data.HeelsOffset       is not null && _heels.IsAvailable)     _heels.RegisterOffset(visible.ObjectIndex, data.HeelsOffset);
-            if (data.MoodlesData       is not null && _moodles.IsAvailable)   _moodles.ApplyStatus(visible.Address, data.MoodlesData);
-            if (data.PetNamesData      is not null && _petnames.IsAvailable)  _petnames.ApplyNames(visible.Ident, data.PetNamesData);
-            if (data.BrioData          is not null && _brio.IsAvailable)      _brio.ApplyPose(visible.ObjectIndex, data.BrioData);
+                    // Critical order: populate the collection's mods BEFORE assigning it to the
+                    // actor. Penumbra snapshots the collection state at assignment time, so adding
+                    // mods after assign means the actor sees an empty collection — no replacements
+                    // apply, even though AddTemporaryMod returns Success.
+                    var tag = $"aethernet:{uid}:{kind}";
+                    _penumbra.AddTemporaryMod(tag, collection, mapping, appearance.ManipulationData ?? "", priority: 0);
+                    _penumbra.AssignTemporaryCollection(collection, targetIndex);
+                }
 
-            _penumbra.RedrawObject(visible.ObjectIndex);
-            foreach (var owned in EnumerateOwnedObjects(visible))
-                _penumbra.RedrawObject(owned.ObjectIndex);
+                if (data.GlamourerData     is not null && _glamourer.IsAvailable) _glamourer.ApplyState(data.GlamourerData, visible.ObjectIndex);
+                if (data.CustomizePlusData is not null && _customize.IsAvailable) _customize.ApplyProfile(visible.ObjectIndex, data.CustomizePlusData);
+                if (data.HonorificTitle    is not null && _honorific.IsAvailable) _honorific.ApplyTitle(visible.ObjectIndex, data.HonorificTitle);
+                if (data.HeelsOffset       is not null && _heels.IsAvailable)     _heels.RegisterOffset(visible.ObjectIndex, data.HeelsOffset);
+                if (data.MoodlesData       is not null && _moodles.IsAvailable)   _moodles.ApplyStatus(visible.Address, data.MoodlesData);
+                if (data.PetNamesData      is not null && _petnames.IsAvailable)  _petnames.ApplyNames(visible.Ident, data.PetNamesData);
+                if (data.BrioData          is not null && _brio.IsAvailable)      _brio.ApplyPose(visible.ObjectIndex, data.BrioData);
 
-            pair.LastAppliedAt = DateTime.UtcNow;
-            _lastApplied[uid] = data.DataVersion;
-        }, cancellationToken: ct).ConfigureAwait(false);
+                _penumbra.RedrawObject(visible.ObjectIndex);
+                foreach (var owned in EnumerateOwnedObjects(visible))
+                    _penumbra.RedrawObject(owned.ObjectIndex);
+
+                pair.LastAppliedAt = DateTime.UtcNow;
+                _lastApplied[uid] = data.DataVersion;
+            }, cancellationToken: ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _transfer.EndApplying(uid);
+        }
     }
 
     private int ResolveActorIndex(VisibleEntry player, AethernetObjectKind kind)

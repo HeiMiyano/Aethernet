@@ -114,6 +114,20 @@ public sealed class PairManager
         Raise();
     }
 
+    /// <summary>
+    /// Call after OUR OWN UserSetPairPermissions hub call succeeds. The hub only pushes
+    /// Client_UserUpdatePairPermissions to the OTHER side of the pair (so uses UpdateOtherPermissions
+    /// above) — nothing ever echoes the change back to the caller, so without this the caller's
+    /// own permission editor keeps reading the stale pre-change value and the checkbox looks
+    /// stuck (e.g. "Pause sync" won't appear to untick even though the server did update it).
+    /// </summary>
+    public void UpdateOwnPermissions(string uid, UserPermissions perms)
+    {
+        if (_pairs.TryGetValue(uid, out var e))
+            e.Pair = e.Pair with { OwnPermissions = perms };
+        Raise();
+    }
+
     public void UpdateProfile(UserProfileDto profile)
     {
         if (_pairs.TryGetValue(profile.User.UID, out var e)) e.LatestProfile = profile;

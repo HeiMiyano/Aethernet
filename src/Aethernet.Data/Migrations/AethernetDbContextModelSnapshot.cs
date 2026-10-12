@@ -119,6 +119,46 @@ namespace Aethernet.Data.Migrations
                     b.ToTable("Blocks");
                 });
 
+            modelBuilder.Entity("Aethernet.Data.Entities.DiscordRecoveryClaimEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DiscordUserId")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Uid")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DiscordUserId");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.ToTable("DiscordRecoveryClaims");
+                });
+
             modelBuilder.Entity("Aethernet.Data.Entities.FileCacheEntity", b =>
                 {
                     b.Property<string>("Hash")

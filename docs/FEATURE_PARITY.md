@@ -11,11 +11,12 @@ A checklist of Aethernet's capabilities, grouped by area, with current implement
 | Anonymous registration (random UID + key)  | ✅       | `RegistrationService.RegisterAsync` |
 | Secret-key login                           | ✅       | PBKDF2-hashed at rest |
 | Discord OAuth registration                 | ✅       | `/auth/oauth/discord` via `AspNet.Security.OAuth.Discord` |
+| Discord-first signup + bot DM recovery      | ✅       | `Aethernet.DiscordBot` (Discord.Net): `/register`, `/recover` + `/claim` (one-time `DiscordRecoveryClaimEntity` token, DM'd), `/whoami`, `/unlink` |
 | Recovery secret                            | ✅       | Returned once at registration; `/auth/recover` |
 | Secret-key rotation                        | ✅       | `/auth/secret/rotate` |
 | JWT issuance + refresh                     | ✅       | 12h access / 30d refresh, rotated |
 | Account deletion                           | ✅       | Hub `UserDelete`; cascade removes pairs + group memberships |
-| Server-wide ban / mod actions              | ✅       | `ModerationBanUser` / `ModerationUnbanUser` hub methods; `BannedUserEntity`; audit log |
+| Server-wide ban / mod actions              | ✅       | `ModerationBanUser` / `ModerationUnbanUser` hub methods + `/admin/users/{uid}/ban`; `BannedUserEntity`; audit log; **force-disconnects an already-connected session immediately** via `IBanEnforcementService` (local abort + Redis fan-out for multi-instance) |
 | Email or 2FA                               | ⛔️       | Out of scope for v1 |
 
 ## Pairing
@@ -131,14 +132,12 @@ A checklist of Aethernet's capabilities, grouped by area, with current implement
 | EF Core migrations                         | ✅       | `scripts/init-migrations.{sh,ps1}` generates + applies the Initial migration in one command |
 | Horizontal scale (Redis backplane)         | ✅       | `AddStackExchangeRedis` wired in `Program.cs` |
 | Rate limiting                              | ✅       | Per-user limits on `UserPushData`, `UserAddPair`, `UserReportProfile`, `GroupCreate`, `GroupJoin`, `GroupChangePassword` |
-| Per-tenant moderation tools                | ✅       | REST surface on the hub at `/admin/reports`, `/admin/users/{uid}`, `/admin/audit`, `/admin/stats` (admin/moderator only). Web dashboard implementation left to the operator |
+| Per-tenant moderation tools                | ✅       | REST surface on the hub at `/admin/reports`, `/admin/users/{uid}`, `/admin/audit`, `/admin/stats` (admin/moderator only), plus a self-contained web dashboard at `/admin/dashboard` (`AdminDashboardHtml`) |
 | GitHub Actions release pipeline            | ✅       | Tag-push triggers build → zip → release → repo.json update for in-game Dalamud installer |
 
 ## Planned next
 
-1. **Discord-first signup + bot recovery** — milestones M1-M6 in the task tracker. New users authenticate via Discord OAuth; lost-credential recovery via a bot DM with one-time claim token.
-2. **Per-pair nicknames** — client-side local labels so users can identify which UID belongs to which person.
-3. **Web moderation dashboard** — REST surface is in place; UI is operator-side work.
+1. **Per-pair nicknames** — client-side local labels so users can identify which UID belongs to which person.
 
 ## Out of scope for v1
 

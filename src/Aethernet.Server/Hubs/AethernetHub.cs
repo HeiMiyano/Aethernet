@@ -19,15 +19,19 @@ public sealed class AethernetHub : Hub<IAethernetHubClient>
     private readonly ICharacterDataDispatcher _dispatch;
     private readonly IGroupService _groups;
     private readonly IRateLimiter _ratelimit;
+    private readonly IConnectionRegistry _connections;
+    private readonly IBanEnforcementService _banEnforcement;
     private readonly ILogger<AethernetHub> _log;
 
     public AethernetHub(
         AethernetDbContext db, IPresenceTracker presence, IPairResolver pairs,
         ICharacterDataDispatcher dispatch, IGroupService groups, IRateLimiter ratelimit,
+        IConnectionRegistry connections, IBanEnforcementService banEnforcement,
         ILogger<AethernetHub> log)
     {
         _db = db; _presence = presence; _pairs = pairs; _dispatch = dispatch;
         _groups = groups; _ratelimit = ratelimit; _log = log;
+        _connections = connections; _banEnforcement = banEnforcement;
     }
 
     private string Uid => Context.User?.FindFirstValue(ClaimTypes.NameIdentifier)
@@ -59,6 +63,7 @@ public sealed class AethernetHub : Hub<IAethernetHubClient>
         await _db.SaveChangesAsync();
 
         await _presence.MarkOnlineAsync(Uid, Context.ConnectionId);
+        _connections.Register(Uid, Context);
         AethernetMetrics.HubConnectionsActive.Inc();
         await base.OnConnectedAsync();
 
@@ -96,6 +101,7 @@ public sealed class AethernetHub : Hub<IAethernetHubClient>
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         await _presence.MarkOfflineAsync(Uid, Context.ConnectionId);
+        _connections.Unregister(Uid, Context.ConnectionId);
         AethernetMetrics.HubConnectionsActive.Dec();
         var pairs = await _pairs.GetActivePairsAsync(Uid);
         var me = new UserDto(Uid);
@@ -399,8 +405,7 @@ public sealed class AethernetHub : Hub<IAethernetHubClient>
         });
         await _db.SaveChangesAsync();
 
-        await Clients.User(user.UID).Client_ReceiveServerMessage(
-            new ServerMessageDto(MessageSeverity.Error, $"You have been banned: {reason ?? "(no reason given)"}"));
+        await _banEnforcement.EnforceBanAsync(user.UID, reason);
     }
 
     public async Task ModerationUnbanUser(UserDto user)

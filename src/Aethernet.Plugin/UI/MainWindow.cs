@@ -255,10 +255,19 @@ public sealed class MainWindow : Window
                 var paused = p.Pair.OwnPermissions.HasFlag(UserPermissions.Paused);
                 if (ImGui.MenuItem(paused ? "Resume" : "Pause"))
                 {
+                    var targetUid = p.Pair.User.UID;
                     var next = paused ? p.Pair.OwnPermissions & ~UserPermissions.Paused
                                       : p.Pair.OwnPermissions |  UserPermissions.Paused;
+                    // The hub only notifies the OTHER side of this change (so they see our
+                    // updated permissions) — nothing echoes back to us, so without updating our
+                    // own PairManager state here on success, this toggle looks stuck/reverts the
+                    // next time the menu is drawn even though the server did apply it.
                     _ = _hub.InvokeAsync(HubMethods.Server.UserSetPairPermissions,
-                        new UserPermissionsDto(p.Pair.User, next));
+                            new UserPermissionsDto(p.Pair.User, next))
+                        .ContinueWith(t =>
+                        {
+                            if (t.IsCompletedSuccessfully) _pairs.UpdateOwnPermissions(targetUid, next);
+                        });
                 }
                 if (ImGui.MenuItem("Remove pair"))
                     _ = _hub.InvokeAsync(HubMethods.Server.UserRemovePair, p.Pair.User);
@@ -428,8 +437,17 @@ public sealed class MainWindow : Window
         }
 
         if (changed)
+        {
+            // Same fix as the context-menu Pause/Resume toggle above: optimistically update our
+            // own PairManager entry once the server confirms the change, since nothing else will.
+            var newPerms = current;
             _ = _hub.InvokeAsync(HubMethods.Server.UserSetPairPermissions,
-                new UserPermissionsDto(new UserDto(uid), current));
+                    new UserPermissionsDto(new UserDto(uid), newPerms))
+                .ContinueWith(t =>
+                {
+                    if (t.IsCompletedSuccessfully) _pairs.UpdateOwnPermissions(uid, newPerms);
+                });
+        }
     }
 
     private void ApplyPermissionsToAllPairs(UserPermissions perms)

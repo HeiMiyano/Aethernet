@@ -78,11 +78,24 @@ The plugin ships configured for HTTPS endpoints. Don't expose any of the three s
 
 ## Moderation
 
-Aethernet ships with three moderation surfaces; build a UI/CLI around them when you go public:
+Aethernet ships with four moderation surfaces:
 
-1. `BannedUserEntity` — `UserGetOnlinePairs` and the hub's `OnConnectedAsync` already reject banned UIDs.
+1. `BannedUserEntity` — the hub's `OnConnectedAsync` rejects banned UIDs on their next connection attempt, and `IBanEnforcementService` force-disconnects an **already-connected** session the moment a ban is issued (local abort on the instance holding the socket, fanned out over Redis pub/sub to the rest of the fleet — see `src/Aethernet.Server/Services/BanEnforcementService.cs`).
 2. `FileCacheEntity.IsForbidden` — when set, `/files/{hash}` returns 451 and `HasFilesResponse.Forbidden` lists the hash.
-3. `ProfileReportEntity` — populated by `UserReportProfile`; build a queue/dashboard for moderators.
+3. `ProfileReportEntity` — populated by `UserReportProfile`.
+4. **Web dashboard** at `https://<hub domain>/admin/dashboard` — sign in with an admin/moderator account, see stats, resolve reports, look up and ban/unban users, read the audit log. Two settings make it work across the split-subdomain topology above:
+   - `Admin__AuthBaseUrl` on the **hub** service — the auth service's public base URL (e.g. `https://auth.example.com`), so the dashboard's login form knows where to POST. Leave blank only if hub and auth somehow share an origin.
+   - `Cors__AllowedOrigins` on the **auth** service — comma-separated origins allowed to call `/auth/login` from a browser (e.g. `https://hub.example.com`). Empty by default (no cross-origin access at all) — the dashboard's login will fail with no explanation beyond "couldn't reach the auth service" until this is set.
+
+## Discord bot (optional)
+
+`Aethernet.DiscordBot` is a separate long-running process (see `deploy/docker-compose.*.yml`'s commented-out / `--profile discord` `discordbot` service). It talks directly to the same Postgres database the other services use — no new network path to secure beyond the bot token itself.
+
+- `Discord__BotToken` — from the [Discord developer portal](https://discord.com/developers/applications); needs the `bot` and `applications.commands` scopes, no privileged gateway intents.
+- `Discord__GuildId` — optional. Set it during development so slash commands register to one test server instantly; global registration (no `GuildId` set) can take up to ~an hour to propagate.
+- `Discord__ClaimTokenLifetimeMinutes` — how long a `/recover` token stays valid before `/claim` rejects it. Default 15.
+
+Commands: `/register` (Discord-first signup, credentials DM'd), `/recover` + `/claim <token>` (lost-credential recovery — DMs a one-time token, then trades it for a rotated secret key), `/whoami` (ephemeral account status), `/unlink` (clears the Discord link). All credential material goes to a DM, never into the public channel reply; if the user's DMs are closed the bot falls back to an ephemeral reply they can still see.
 
 ## Disclaimer
 

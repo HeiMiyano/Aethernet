@@ -85,6 +85,21 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
 
+  # Discord-first signup + bot-DM account recovery (optional — see docs/FEATURE_PARITY.md
+  # and src/Aethernet.DiscordBot). Opt in with: docker compose --profile discord up -d
+  discordbot:
+    build:
+      context: ..
+      dockerfile: src/Aethernet.DiscordBot/Dockerfile
+    restart: unless-stopped
+    profiles: ["discord"]
+    environment:
+      ConnectionStrings__Default: "Host=postgres;Database=aethernet;Username=aethernet;Password=${POSTGRES_PASSWORD}"
+      Discord__BotToken: ${DISCORD_BOT_TOKEN:?DISCORD_BOT_TOKEN must be set in .env to use the discord profile}
+      Discord__GuildId:  ${DISCORD_GUILD_ID:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

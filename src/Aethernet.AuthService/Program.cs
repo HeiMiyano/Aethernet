@@ -59,12 +59,23 @@ if (!string.IsNullOrWhiteSpace(discordClientId) && !string.IsNullOrWhiteSpace(di
 }
 builder.Services.AddAuthorization();
 
+// The web moderation dashboard is served by Aethernet.Server (a different origin/subdomain in
+// prod — see deploy/Caddyfile), but logs in against THIS service's /auth/login. Only enabled
+// when an origin is actually configured; empty by default means no cross-origin access at all.
+var corsOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+builder.Services.AddCors(o => o.AddPolicy("AdminDashboard", p =>
+{
+    if (corsOrigins.Length > 0) p.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod();
+}));
+
 builder.Services.AddControllers();
 builder.Services.AddHealthChecks().AddDbContextCheck<AethernetDbContext>("postgres");
 
 var app = builder.Build();
 
 app.UseSerilogRequestLogging();
+app.UseCors("AdminDashboard");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapHealthChecks("/healthz");

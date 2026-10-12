@@ -18,6 +18,7 @@ public class AethernetDbContext : DbContext
     public DbSet<AuditLogEntity>      AuditLog       => Set<AuditLogEntity>();
     public DbSet<BannedUserEntity>    BannedUsers    => Set<BannedUserEntity>();
     public DbSet<BlockEntity>         Blocks         => Set<BlockEntity>();
+    public DbSet<DiscordRecoveryClaimEntity> DiscordRecoveryClaims => Set<DiscordRecoveryClaimEntity>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -104,6 +105,12 @@ public class AethernetDbContext : DbContext
         {
             e.HasIndex(x => new { x.OwnerUid, x.OtherUid }).IsUnique();
             e.HasIndex(x => x.OtherUid);
+        });
+
+        b.Entity<DiscordRecoveryClaimEntity>(e =>
+        {
+            e.HasIndex(x => x.DiscordUserId);
+            e.HasIndex(x => x.ExpiresAt);
         });
     }
 }

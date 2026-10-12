@@ -66,6 +66,27 @@ public sealed class FileTransferService : IDisposable
             ? null
             : new AuthenticationHeaderValue("Bearer", _config.AccessToken);
 
+    /// <summary>
+    /// Marks a UID as "past downloading, now applying" so the in-world overlay / transfer
+    /// window keep showing something for this character instead of going blank between
+    /// "all files downloaded" and "actually visible in-game" (Penumbra collection setup, IPC
+    /// calls, redraw — can take a visible moment for a big outfit or a busy syncshell).
+    /// </summary>
+    public void BeginApplying(string uid)
+    {
+        _perUid.AddOrUpdate(uid,
+            _ => new UidDownloadProgress { Applying = true, FilesTotal = 1, FilesDone = 1 },
+            (_, existing) => { existing.Applying = true; return existing; });
+        UidDownloadChanged?.Invoke(uid);
+    }
+
+    /// <summary>Call once CharacterDataApplier is done with this UID (success or failure).</summary>
+    public void EndApplying(string uid)
+    {
+        if (_perUid.TryRemove(uid, out _))
+            UidDownloadChanged?.Invoke(uid);
+    }
+
     public async Task<HasFilesResponseDto> WhichAreMissingAsync(IReadOnlyList<string> hashes, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Post, Routes.Files.Has)
@@ -309,6 +330,16 @@ public sealed class UidDownloadProgress
     public long BytesTotal;
     public long BytesDone;
     public double Fraction => BytesTotal <= 0 ? 0 : Math.Min(1.0, BytesDone / (double)BytesTotal);
+
+    /// <summary>
+    /// True once file transfer is done (or was never needed — already-cached files skip
+    /// downloading entirely) and CharacterDataApplier has moved on to the Penumbra/IPC + redraw
+    /// phase. There's no fine-grained progress for that phase, so the UI just shows a full/
+    /// indeterminate bar with a different label instead of disappearing — previously the bar
+    /// vanished the instant downloads finished, leaving no indication anything was still
+    /// happening for however long the actual mod application + redraw took.
+    /// </summary>
+    public bool Applying;
 }
 
 /// <summary>

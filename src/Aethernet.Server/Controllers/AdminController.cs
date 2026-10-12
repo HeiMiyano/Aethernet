@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Aethernet.Data;
 using Aethernet.Data.Entities;
+using Aethernet.Server.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -19,7 +20,11 @@ namespace Aethernet.Server.Controllers;
 public sealed class AdminController : ControllerBase
 {
     private readonly AethernetDbContext _db;
-    public AdminController(AethernetDbContext db) { _db = db; }
+    private readonly IBanEnforcementService _banEnforcement;
+    public AdminController(AethernetDbContext db, IBanEnforcementService banEnforcement)
+    {
+        _db = db; _banEnforcement = banEnforcement;
+    }
 
     private string Uid => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
 
@@ -102,6 +107,7 @@ public sealed class AdminController : ControllerBase
             ActorUid = Uid, Action = "user.ban", TargetUid = uid, Detail = req.Reason, CreatedAt = DateTime.UtcNow,
         });
         await _db.SaveChangesAsync(ct);
+        await _banEnforcement.EnforceBanAsync(uid, req.Reason);
         return NoContent();
     }
 

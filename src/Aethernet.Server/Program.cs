@@ -3,6 +3,7 @@ using System.Text;
 using Aethernet.API;
 using Aethernet.Data;
 using Aethernet.Server.Hubs;
+using Aethernet.Server.AdminDashboard;
 using Aethernet.Server.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.SignalR;
@@ -84,6 +85,14 @@ builder.Services.AddScoped<IPairResolver, PairResolver>();
 builder.Services.AddScoped<ICharacterDataDispatcher, CharacterDataDispatcher>();
 builder.Services.AddScoped<IGroupService, GroupService>();
 builder.Services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();
+
+// Real-time ban enforcement: local connection registry + the service that uses it. The
+// cross-instance broadcast listener only makes sense once Redis (the multi-instance
+// backplane) is actually configured.
+builder.Services.AddSingleton<IConnectionRegistry, ConnectionRegistry>();
+builder.Services.AddScoped<IBanEnforcementService, BanEnforcementService>();
+if (!string.IsNullOrWhiteSpace(redisConn))
+    builder.Services.AddHostedService<BanBroadcastListener>();
 // SignalR maps to ClaimTypes.NameIdentifier. Built-in NameUserIdProvider is internal in
 // recent ASP.NET Core builds, so we provide a one-liner equivalent.
 builder.Services.AddSingleton<IUserIdProvider, ClaimsNameIdentifierUserIdProvider>();
@@ -110,6 +119,12 @@ app.MapGet(Routes.Server.ApiInfo, (IConfiguration cfg) => new
     build           = typeof(Program).Assembly.GetName().Version?.ToString() ?? "0.0.0",
     motd            = cfg["Motd"],
 });
+
+// Web moderation dashboard — see AdminDashboardHtml. The page itself handles its own JWT
+// login (admin/moderator role check happens server-side on every /admin/* call it makes),
+// so the shell is served anonymously, same as a normal SPA's index.html.
+app.MapGet("/admin/dashboard", (IConfiguration cfg) =>
+    Results.Content(AdminDashboardHtml.Render(cfg["Admin:AuthBaseUrl"] ?? ""), "text/html"));
 
 app.MapControllers();
 

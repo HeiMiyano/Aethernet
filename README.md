@@ -26,6 +26,7 @@ Groups ("syncshells") let many players share a single rotating password and beco
 | `Aethernet.Server` | ASP.NET Core | SignalR hub: pairing, presence, character-data push, groups, moderation. |
 | `Aethernet.AuthService` | ASP.NET Core | Registration (Discord OAuth + secret-key), JWT issuance, refresh, recovery. |
 | `Aethernet.FileServer` | ASP.NET Core | Content-addressed upload/download of mod blobs by SHA-1. |
+| `Aethernet.DiscordBot` | .NET console (Discord.Net) | Discord-first signup + bot-DM lost-credential recovery; account status/unlink. Optional. |
 | `Aethernet.API` | netstandard2.0 library | DTOs + hub method constants shared by client and server. |
 | `Aethernet.Shared` | net8.0 library | Cross-cutting utilities (hashing, logging, JSON config). |
 | `Aethernet.Data` | net8.0 library | EF Core `DbContext`, entities, migrations (Npgsql / PostgreSQL). |

@@ -86,8 +86,10 @@ public sealed class DownloadOverlay : IDisposable
         drawList.AddRectFilled(min, max, bg, 3f);
         drawList.AddRect(min, max, border, 3f);
 
-        // Filled portion proportional to fraction
-        var fraction = (float)p.Fraction;
+        // Filled portion proportional to fraction. While applying (post-download Penumbra/IPC
+        // phase, which has no finer-grained progress of its own) just show a full bar rather
+        // than snapping back to empty or disappearing.
+        var fraction = p.Applying ? 1f : (float)p.Fraction;
         if (fraction > 0)
         {
             var fillMin = new Vector2(min.X + padding, min.Y + padding);
@@ -109,6 +111,8 @@ public sealed class DownloadOverlay : IDisposable
 
     private static string FormatLabel(UidDownloadProgress p)
     {
+        if (p.Applying) return "Applying mods…";
+
         string fmt(long bytes) => bytes switch
         {
             < 1024 => $"{bytes} B",

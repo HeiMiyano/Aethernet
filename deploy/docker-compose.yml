@@ -81,3 +81,15 @@ services:
   #     postgres: { condition: service_healthy }
   #     minio:    { condition: service_started }
   #   ports: ["5003:8080"]
+#
+  # discordbot:
+  #   build:
+  #     context: ..
+  #     dockerfile: src/Aethernet.DiscordBot/Dockerfile
+  #   environment:
+  #     ConnectionStrings__Default: "Host=postgres;Database=aethernet;Username=aethernet;Password=aethernet_dev_password"
+  #     Discord__BotToken: "<bot token from the Discord developer portal>"
+  #     Discord__GuildId: "<your test server's ID, for instant slash-command registration>"
+  #   depends_on:
+  #     postgres: { condition: service_healthy }
+  #   # No ports — the bot only makes outbound connections to Discord's gateway.
