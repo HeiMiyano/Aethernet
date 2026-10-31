@@ -43,6 +43,39 @@ public sealed class FileTransferService : IDisposable
     public SelfUploadProgress? SelfUpload => Volatile.Read(ref _selfUpload);
     public event Action? SelfUploadChanged;
 
+    /// <summary>How long the in-world bars keep showing a "done" state after a transfer/apply
+    /// finishes. Without this a sync that's fully served from cache (the common case) finishes in
+    /// ~10-40 ms and the bar never appears at all, so there's no visible sign anything happened.</summary>
+    public static readonly TimeSpan CompletionLinger = TimeSpan.FromSeconds(1.5);
+
+    private readonly ConcurrentDictionary<string, CompletedTransfer> _recentDownloads = new();
+
+    /// <summary>Per-UID syncs that finished within <see cref="CompletionLinger"/>. Expired entries
+    /// are pruned on read.</summary>
+    public IReadOnlyDictionary<string, CompletedTransfer> RecentDownloads
+    {
+        get
+        {
+            var now = DateTime.UtcNow;
+            foreach (var kv in _recentDownloads)
+                if (now - kv.Value.At > CompletionLinger) _recentDownloads.TryRemove(kv);
+            return _recentDownloads;
+        }
+    }
+
+    private CompletedTransfer? _selfUploadDone;
+
+    /// <summary>The local player's last upload batch, if it finished within
+    /// <see cref="CompletionLinger"/>; otherwise null.</summary>
+    public CompletedTransfer? SelfUploadDone
+    {
+        get
+        {
+            var d = Volatile.Read(ref _selfUploadDone);
+            return d is not null && DateTime.UtcNow - d.At <= CompletionLinger ? d : null;
+        }
+    }
+
     public FileTransferService(AethernetConfig config, FileCacheService cache, ILogger<FileTransferService> log)
     {
         _config = config; _cache = cache; _log = log;
@@ -80,11 +113,15 @@ public sealed class FileTransferService : IDisposable
         UidDownloadChanged?.Invoke(uid);
     }
 
-    /// <summary>Call once CharacterDataApplier is done with this UID (success or failure).</summary>
-    public void EndApplying(string uid)
+    /// <summary>Call once CharacterDataApplier is done with this UID (success or failure).
+    /// On success the UID shows a brief "synced" state in the overlay; <paramref name="downloadedFiles"/>
+    /// is how many of the pair's files had to be fetched (0 = everything came from cache).</summary>
+    public void EndApplying(string uid, bool succeeded, int downloadedFiles)
     {
-        if (_perUid.TryRemove(uid, out _))
-            UidDownloadChanged?.Invoke(uid);
+        _perUid.TryRemove(uid, out _);
+        if (succeeded)
+            _recentDownloads[uid] = new CompletedTransfer(DateTime.UtcNow, downloadedFiles, downloadedFiles, 0);
+        UidDownloadChanged?.Invoke(uid);
     }
 
     public async Task<HasFilesResponseDto> WhichAreMissingAsync(IReadOnlyList<string> hashes, CancellationToken ct)
@@ -138,8 +175,13 @@ public sealed class FileTransferService : IDisposable
         }
         finally
         {
-            // Always clear, even on error, so a half-finished bar doesn't linger forever.
+            // Always clear, even on error, so a half-finished bar doesn't linger forever. If any
+            // file made it up, leave a short "uploaded" state for the overlay.
+            var finished = Volatile.Read(ref _selfUpload);
             Volatile.Write(ref _selfUpload, null);
+            if (finished is not null && finished.FilesDone > 0)
+                Volatile.Write(ref _selfUploadDone, new CompletedTransfer(
+                    DateTime.UtcNow, finished.FilesDone, finished.FilesTotal, Interlocked.Read(ref finished.BytesDone)));
             SelfUploadChanged?.Invoke();
         }
     }
@@ -322,6 +364,10 @@ public sealed class TransferProgress
     { Hash = hash; Kind = kind; TotalBytes = total; }
 }
 public enum TransferKind { Upload, Download }
+
+/// <summary>A finished transfer/apply, kept briefly so the overlay can show a "done" state.
+/// <paramref name="Files"/> succeeded out of <paramref name="FilesExpected"/>.</summary>
+public sealed record CompletedTransfer(DateTime At, int Files, int FilesExpected, long Bytes);
 
 public sealed class UidDownloadProgress
 {

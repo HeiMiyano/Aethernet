@@ -27,6 +27,8 @@ public sealed class AethernetConfig : IPluginConfiguration
     // ---- behaviour ----
     public bool   AutoConnectOnStartup     { get; set; } = true;
     public bool   PauseOutsideOfCities     { get; set; } = false;
+    /// <summary>Show the in-world progress bars: blue over paired players while their mods download/apply,
+    /// orange over you while your files upload. (Name kept for saved-config compatibility; covers both.)</summary>
     public bool   ShowDownloadProgressBars { get; set; } = true;
     public int    MaxParallelDownloads     { get; set; } = 4;
     public int    MaxParallelUploads       { get; set; } = 2;

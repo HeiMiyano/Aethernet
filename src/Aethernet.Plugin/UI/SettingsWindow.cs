@@ -113,6 +113,11 @@ public sealed class SettingsWindow : Window
             var pauseCity = _config.PauseOutsideOfCities;
             if (ImGui.Checkbox("Pause when outside major cities", ref pauseCity)) _config.PauseOutsideOfCities = pauseCity;
 
+            var bars = _config.ShowDownloadProgressBars;
+            if (ImGui.Checkbox("Show in-world sync progress bars", ref bars)) _config.ShowDownloadProgressBars = bars;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Blue bar over paired players while their mods download and apply;\norange bar over you while your files upload.");
+
             var debounce = _config.DataPushDebounceMs;
             if (ImGui.SliderInt("Data-push debounce (ms)", ref debounce, 50, 2000)) _config.DataPushDebounceMs = debounce;
 

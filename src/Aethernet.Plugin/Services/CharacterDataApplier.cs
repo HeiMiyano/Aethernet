@@ -79,7 +79,8 @@ public sealed class CharacterDataApplier
         var allHashes = data.Appearances.Values
             .SelectMany(a => a.FileReplacements.Values)
             .Distinct().ToList();
-        _log.LogInformation("Downloading {Count} unique files for {Uid}", allHashes.Count, uid);
+        var needDownload = allHashes.Count(h => !_cache.Has(h));
+        _log.LogInformation("Downloading {Count} unique files for {Uid} ({Need} not cached)", allHashes.Count, uid, needDownload);
         await _transfer.DownloadManyAsync(allHashes, ownerUid: uid, ct);
 
         // Verify cache state after download.
@@ -100,6 +101,7 @@ public sealed class CharacterDataApplier
         // though applying a big outfit or a busy syncshell pair can still take a visible moment.
         // BeginApplying/EndApplying keep something on screen through that gap.
         _transfer.BeginApplying(uid);
+        var applied = false;
         try
         {
             await _framework.RunOnTick(() =>
@@ -150,11 +152,12 @@ public sealed class CharacterDataApplier
 
                 pair.LastAppliedAt = DateTime.UtcNow;
                 _lastApplied[uid] = data.DataVersion;
+                applied = true;
             }, cancellationToken: ct).ConfigureAwait(false);
         }
         finally
         {
-            _transfer.EndApplying(uid);
+            _transfer.EndApplying(uid, applied, needDownload);
         }
     }
 

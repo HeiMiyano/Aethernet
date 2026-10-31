@@ -1,4 +1,5 @@
 using System.Numerics;
+using Aethernet.Plugin.Configuration;
 using Aethernet.Plugin.Services;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Plugin;
@@ -10,10 +11,10 @@ namespace Aethernet.Plugin.UI;
 
 /// <summary>
 /// In-world overlay that draws a single progress bar above the local player while we are
-/// uploading mod files to the file server. Mirrors <see cref="DownloadOverlay"/> in shape
-/// (same bar geometry, same label format) but uses the aggregated SelfUploadProgress from
-/// <see cref="FileTransferService"/> and a distinct color so the user can tell at a glance
-/// whether they're sending or receiving.
+/// uploading mod files to the file server, then a short green "uploaded" state when the batch
+/// finishes. Same bar as <see cref="DownloadOverlay"/> but orange, so sending vs receiving is
+/// obvious. Only appears when files actually need uploading — data the server already has is
+/// deduped and never transfers. Hidden when <see cref="AethernetConfig.ShowDownloadProgressBars"/> is off.
 /// </summary>
 public sealed class UploadOverlay : IDisposable
 {
@@ -21,14 +22,15 @@ public sealed class UploadOverlay : IDisposable
     private readonly IGameGui _gui;
     private readonly IObjectTable _objectTable;
     private readonly FileTransferService _transfer;
+    private readonly AethernetConfig _config;
     private readonly ILogger<UploadOverlay> _log;
 
     public UploadOverlay(
         IDalamudPluginInterface pi, IGameGui gui, IObjectTable objectTable,
-        FileTransferService transfer, ILogger<UploadOverlay> log)
+        FileTransferService transfer, AethernetConfig config, ILogger<UploadOverlay> log)
     {
         _pi = pi; _gui = gui; _objectTable = objectTable;
-        _transfer = transfer; _log = log;
+        _transfer = transfer; _config = config; _log = log;
     }
 
     public void Initialize()
@@ -43,73 +45,42 @@ public sealed class UploadOverlay : IDisposable
 
     private void DrawOverlay()
     {
+        if (!_config.ShowDownloadProgressBars) return;
+
         var progress = _transfer.SelfUpload;
-        if (progress is null) return;
+        var done = progress is null ? _transfer.SelfUploadDone : null;
+        if (progress is null && done is null) return;
 
         // Object table slot 0 is always the local player when logged in. Cast guards against
         // the brief startup window when the slot exists but isn't yet a player character.
-        var player = _objectTable[0] as IPlayerCharacter;
-        if (player is null) return;
+        if (_objectTable[0] is not IPlayerCharacter player) return;
 
-        // Anchor a bit higher than the download bar (2.7f vs 2.4f) so that if both upload
-        // AND a download were ever happening on the same character (unlikely but possible
-        // during a heavy session), the two bars wouldn't overlap.
+        // A bit higher than the download bar (2.7f vs 2.4f) so the two never overlap.
         var worldPos = player.Position;
         var anchor = new Vector3(worldPos.X, worldPos.Y + 2.7f, worldPos.Z);
         if (!_gui.WorldToScreen(anchor, out var screenPos)) return;
 
         var drawList = ImGui.GetBackgroundDrawList();
-        DrawProgressBar(drawList, screenPos, player.Name.TextValue, progress);
-    }
-
-    private static void DrawProgressBar(ImDrawListPtr drawList, Vector2 anchor, string label, SelfUploadProgress p)
-    {
-        const float barWidth = 140f;
-        const float barHeight = 6f;
-        const float padding = 2f;
-
-        // Same shape as DownloadOverlay but warmer color (orange/yellow) so direction is
-        // visually obvious: blue = incoming, orange = outgoing.
-        var bg     = ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.55f));
-        var border = ImGui.GetColorU32(new Vector4(1f, 0.7f, 0.3f, 0.8f));
-        var fill   = ImGui.GetColorU32(new Vector4(1f, 0.8f, 0.3f, 0.95f));
-        var textCol = ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 1f));
-
-        var min = new Vector2(anchor.X - barWidth / 2 - padding, anchor.Y);
-        var max = new Vector2(anchor.X + barWidth / 2 + padding, anchor.Y + barHeight + padding * 2);
-        drawList.AddRectFilled(min, max, bg, 3f);
-        drawList.AddRect(min, max, border, 3f);
-
-        var fraction = (float)p.Fraction;
-        if (fraction > 0)
+        if (progress is not null)
         {
-            var fillMin = new Vector2(min.X + padding, min.Y + padding);
-            var fillMax = new Vector2(fillMin.X + barWidth * fraction, max.Y - padding);
-            drawList.AddRectFilled(fillMin, fillMax, fill, 2f);
+            TransferBar.Draw(drawList, screenPos, (float)progress.Fraction, FormatLabel(progress), TransferBar.Outgoing);
         }
-
-        var text = FormatLabel(p);
-        var textSize = ImGui.CalcTextSize(text);
-        var textPos = new Vector2(anchor.X - textSize.X / 2, anchor.Y - textSize.Y - 1);
-        drawList.AddRectFilled(
-            new Vector2(textPos.X - 3, textPos.Y - 1),
-            new Vector2(textPos.X + textSize.X + 3, textPos.Y + textSize.Y + 1),
-            ImGui.GetColorU32(new Vector4(0, 0, 0, 0.55f)), 2f);
-        drawList.AddText(textPos, textCol, text);
+        else if (done is not null)
+        {
+            var partial = done.Files < done.FilesExpected;
+            var label = partial
+                ? $"Uploaded {done.Files}/{done.FilesExpected} files (some failed)"
+                : $"Uploaded {TransferBar.FormatBytes(done.Bytes)} ({done.Files} files)";
+            TransferBar.Draw(drawList, screenPos, partial ? done.Files / (float)done.FilesExpected : 1f,
+                label, partial ? TransferBar.Outgoing : TransferBar.Done, TransferBar.FadeAlpha(done));
+        }
     }
 
     private static string FormatLabel(SelfUploadProgress p)
     {
-        string fmt(long bytes) => bytes switch
-        {
-            < 1024 => $"{bytes} B",
-            < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
-            < 1024L * 1024 * 1024 => $"{bytes / 1024.0 / 1024.0:F1} MB",
-            _ => $"{bytes / 1024.0 / 1024.0 / 1024.0:F2} GB",
-        };
-        // "↑ uploading 12.3 MB / 47.8 MB (3/8 files)" — arrow makes direction unambiguous
-        // even for users who don't read the color cue.
+        // "↑ 12.3 MB / 47.8 MB (3/8 files)" — arrow makes direction unambiguous even for users
+        // who don't read the color cue.
         if (p.BytesTotal <= 0) return $"↑ uploading {p.FilesDone}/{p.FilesTotal}…";
-        return $"↑ {fmt(p.BytesDone)} / {fmt(p.BytesTotal)} ({p.FilesDone}/{p.FilesTotal})";
+        return $"↑ {TransferBar.FormatBytes(p.BytesDone)} / {TransferBar.FormatBytes(p.BytesTotal)} ({p.FilesDone}/{p.FilesTotal})";
     }
 }
