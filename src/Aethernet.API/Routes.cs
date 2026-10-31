@@ -6,14 +6,15 @@ public static class Routes
     public static class Auth
     {
         public const string Base                = "/auth";
-        public const string Register            = "/auth/register";          // POST  { recovery_secret? } -> { uid, secret_key }
+        public const string Register            = "/auth/register";          // POST  — disabled (410): accounts are created via Discord
         public const string Login               = "/auth/login";             // POST  { uid, secret_key } -> { jwt, refresh, expires_in }
         public const string Refresh             = "/auth/refresh";           // POST  { refresh } -> { jwt, refresh, expires_in }
         public const string Logout              = "/auth/logout";            // POST  Authorization: Bearer ...
         public const string Recover             = "/auth/recover";           // POST  { recovery_secret } -> { uid, secret_key }
         public const string Me                  = "/auth/me";                // GET
-        public const string DiscordOAuthStart   = "/auth/oauth/discord";     // GET   redirect
-        public const string DiscordOAuthReturn  = "/auth/oauth/discord/cb";  // GET   ?code
+        public const string DiscordBegin        = "/auth/discord/begin";     // POST  { mode, uid?, secretKey? } -> { authorizeUrl, pollToken, expiresInSeconds }
+        public const string DiscordCallback     = "/auth/discord/callback";  // GET   Discord redirects the browser here (?code&state)
+        public const string DiscordPoll         = "/auth/discord/poll";      // POST  { pollToken } -> { status, uid?, secretKey?, ... }
         public const string RotateSecret        = "/auth/secret/rotate";     // POST
     }
 

@@ -11,34 +11,6 @@ public sealed class RegistrationService : IRegistrationService
     private readonly AethernetDbContext _db;
     public RegistrationService(AethernetDbContext db) { _db = db; }
 
-    public async Task<RegisterResponseDto> RegisterAsync(RegisterRequestDto request, string? discordUserId)
-    {
-        // If they're authenticating via Discord and an account already exists, hand back a new
-        // secret key for it instead of creating a duplicate.
-        if (!string.IsNullOrEmpty(discordUserId))
-        {
-            var existing = await _db.Users.FirstOrDefaultAsync(u => u.DiscordUserId == discordUserId);
-            if (existing is not null) return await RotateSecretAsync(existing.Uid);
-        }
-
-        var uid = UidGenerator.NewUid();
-        var key = UidGenerator.NewSecretKey();
-        var recovery = string.IsNullOrEmpty(request.RecoverySecret)
-            ? UidGenerator.NewRecoverySecret() : request.RecoverySecret;
-
-        _db.Users.Add(new UserEntity
-        {
-            Uid               = uid,
-            SecretKeyHash     = SecretKeyHasher.Hash(key),
-            RecoverySecretHash= SecretKeyHasher.Hash(recovery),
-            DiscordUserId     = discordUserId,
-            CreatedAt         = DateTime.UtcNow,
-            LastSeenAt        = DateTime.UtcNow,
-        });
-        await _db.SaveChangesAsync();
-        return new RegisterResponseDto(uid, key);
-    }
-
     public async Task<RegisterResponseDto> RotateSecretAsync(string uid)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Uid == uid)

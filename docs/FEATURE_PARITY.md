@@ -116,7 +116,7 @@ A checklist of Aethernet's capabilities, grouped by area, with current implement
 | Slash command (`/aethernet …`)             | ✅       | `UiBootstrapper.OnCommand` — settings/profile/downloads/blocks/wizard |
 | First-run wizard                           | ✅       | `FirstRunWizard` — auto-opens when no credentials |
 | Notification icons in nameplates           | ✅       | `NameplateDecorator` prefixes paired/visible players via `INamePlateGui` |
-| Accent-color theming                       | ✅       | Accent-color picker in Settings, pushed into ImGui style each frame by `ThemeApplier` |
+| Accent-color theming                       | ❌ removed | Mutated ImGui's shared `GetStyle().Colors` every frame with nothing reverting it — leaked into Dalamud's own UI and other plugins' windows and left colors stuck after Aethernet stopped running. Deleted; no color override now. |
 
 ## Ops / deploy
 

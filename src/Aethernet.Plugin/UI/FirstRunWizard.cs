@@ -12,8 +12,9 @@ using Dalamud.Bindings.ImGui;
 namespace Aethernet.Plugin.UI;
 
 /// <summary>
-/// Modal-ish wizard that walks a brand-new user through the bare minimum: register (or log
-/// in with an existing UID/key), connect, optionally add a first pair. Server URLs are
+/// Modal-ish wizard that walks a brand-new user through the bare minimum: sign in with Discord
+/// (the only way to create an account), connect, optionally add a first pair. Also the place
+/// pre-Discord accounts are sent to when the server says they must link Discord first. Server URLs are
 /// baked into AethernetConfig defaults so the user never has to know about them.
 /// Shown automatically when the plugin starts without credentials configured.
 /// </summary>
@@ -22,6 +23,7 @@ public sealed class FirstRunWizard : Window
     private readonly AethernetConfig _config;
     private readonly IDalamudPluginInterface _pi;
     private readonly HubConnectionService _hub;
+    private readonly DiscordSignInService _discord;
 
     // The Servers step was removed once we baked the production URLs into AethernetConfig
     // defaults — users no longer need to know about the underlying endpoints. Power users
@@ -32,20 +34,26 @@ public sealed class FirstRunWizard : Window
 
     private string _existingUid = string.Empty;
     private string _existingKey = string.Empty;
-    private string _recoverySecret = string.Empty;
+    // Set when the user logs in with a UID + secret key (an older, possibly unlinked account),
+    // so we can offer Link Discord straight away instead of waiting for the server to refuse it.
+    private bool _loggedInWithKey;
     private string _firstPairUid = string.Empty;
     private string _statusLine = string.Empty;
     private bool _busy;
     private DateTime _copyFeedbackUntil = DateTime.MinValue;
 
-    public FirstRunWizard(AethernetConfig config, IDalamudPluginInterface pi, HubConnectionService hub)
+    public FirstRunWizard(AethernetConfig config, IDalamudPluginInterface pi, HubConnectionService hub,
+                          DiscordSignInService discord)
         : base("Welcome to Aethernet###AethernetWizard",
                ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking)
     {
-        _config = config; _pi = pi; _hub = hub;
+        _config = config; _pi = pi; _hub = hub; _discord = discord;
         Size = new Vector2(560, 440);
         SizeCondition = ImGuiCond.Always;
     }
+
+    /// <summary>Jump straight to the account step (used when the server demands a Discord link).</summary>
+    public void ShowAccountStep() => _step = Step.Account;
 
     public override void Draw()
     {
@@ -76,9 +84,24 @@ public sealed class FirstRunWizard : Window
 
     private void DrawAccount()
     {
-        if (!string.IsNullOrEmpty(_config.Uid))
+        var hasAccount = !string.IsNullOrEmpty(_config.Uid);
+
+        if (hasAccount && _hub.DiscordLinkRequired)
         {
-            ImGui.TextColored(new Vector4(0.2f,0.8f,0.3f,1f), $"Existing account: {_config.Uid}");
+            ImGui.TextColored(new Vector4(0.95f, 0.7f, 0.3f, 1f), "One more step: link your Discord account");
+            ImGui.Spacing();
+            ImGui.TextWrapped($"Your account {_config.Uid} was created before Aethernet switched to Discord " +
+                              "sign-in, and it has to be linked to Discord before it can connect. Your UID, " +
+                              "pairs and syncshells all stay exactly as they are.");
+            ImGui.Spacing();
+            DiscordSignInWidget.Draw(_discord, "Link Discord", _discord.StartLink, "wizard_link");
+            BottomBar(nextEnabled: false);
+            return;
+        }
+
+        if (hasAccount)
+        {
+            ImGui.TextColored(new Vector4(0.2f,0.8f,0.3f,1f), $"Signed in: {_config.Uid}");
             ImGui.SameLine();
             if (ImGui.SmallButton("Copy UID##wizard"))
             {
@@ -91,32 +114,41 @@ public sealed class FirstRunWizard : Window
                 ImGui.TextColored(new Vector4(0.2f, 0.8f, 0.3f, 1f), "copied!");
             }
             ImGui.TextDisabled("Share this UID with a friend so they can add you as a pair.");
+
+            if (_loggedInWithKey && !_config.DiscordLinked)
+            {
+                ImGui.Spacing();
+                ImGui.TextWrapped("If this account isn't linked to Discord yet, link it now — it'll be " +
+                                  "required to connect soon, and it lets you recover the account with Discord.");
+                DiscordSignInWidget.Draw(_discord, "Link Discord", _discord.StartLink, "wizard_link_opt");
+            }
+            else if (_discord.Phase == DiscordSignInService.SignInPhase.Succeeded)
+            {
+                ImGui.TextWrapped(_discord.StatusMessage);
+            }
             BottomBar(nextEnabled: true);
             return;
         }
 
-        ImGui.TextWrapped("You can either register a brand-new account or recover an existing one.");
+        ImGui.TextWrapped("Aethernet accounts are tied to your Discord account. Click the button below: " +
+                          "your browser opens Discord, you click Authorize, then come back here — " +
+                          "Aethernet picks it up automatically.");
         ImGui.Spacing();
-        if (ImGui.CollapsingHeader("Register new account", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            ImGui.InputTextWithHint("##new_recovery", "(optional) bring your own recovery secret", ref _recoverySecret, 128);
-            if (ImGui.Button("Register") && !_busy) _ = RegisterAsync();
-        }
-        if (ImGui.CollapsingHeader("Log in with an existing UID + secret key"))
+        DiscordSignInWidget.Draw(_discord, "Sign in with Discord", _discord.StartSignIn, "wizard_signin");
+        ImGui.TextDisabled("New? This creates your account. Already have one? This signs you back in.");
+        ImGui.Spacing();
+
+        if (ImGui.CollapsingHeader("I have an older account (UID + secret key)"))
         {
             ImGui.InputText("UID",        ref _existingUid, 32);
             ImGui.InputText("Secret key", ref _existingKey, 96);
             if (ImGui.Button("Log in") && !_busy) _ = LoginAsync();
-        }
-        if (ImGui.CollapsingHeader("Recover with a recovery secret"))
-        {
-            ImGui.InputText("Recovery secret", ref _recoverySecret, 128);
-            if (ImGui.Button("Recover") && !_busy) _ = RecoverAsync();
+            ImGui.TextDisabled("You'll be asked to link it to Discord afterwards.");
         }
         if (!string.IsNullOrEmpty(_statusLine))
             ImGui.TextDisabled(_statusLine);
 
-        BottomBar(nextEnabled: !string.IsNullOrEmpty(_config.Uid));
+        BottomBar(nextEnabled: false);
     }
 
     private void DrawPairing()
@@ -183,26 +215,6 @@ public sealed class FirstRunWizard : Window
 
     // ---- network helpers ----
 
-    private async Task RegisterAsync()
-    {
-        _busy = true; _statusLine = "Registering…";
-        try
-        {
-            using var http = new HttpClient();
-            var resp = await http.PostAsJsonAsync($"{AethernetServers.AuthUrl.TrimEnd('/')}{Routes.Auth.Register}",
-                new RegisterRequestDto(string.IsNullOrWhiteSpace(_recoverySecret) ? null : _recoverySecret));
-            resp.EnsureSuccessStatusCode();
-            var body = await resp.Content.ReadFromJsonAsync<RegisterResponseDto>();
-            if (body is null) throw new InvalidOperationException("empty response");
-            _config.Uid = body.UID; _config.SecretKey = body.SecretKey;
-            _pi.SavePluginConfig(_config);
-            _statusLine = $"Registered as {body.UID}. SAVE YOUR SECRET KEY — it is shown only once.";
-            await _hub.StartAsync();
-        }
-        catch (Exception ex) { _statusLine = $"Failed: {ex.Message}"; }
-        finally { _busy = false; }
-    }
-
     private async Task LoginAsync()
     {
         _busy = true; _statusLine = "Connecting…";
@@ -210,29 +222,13 @@ public sealed class FirstRunWizard : Window
         {
             _config.Uid = _existingUid.Trim();
             _config.SecretKey = _existingKey.Trim();
+            _config.AccessToken = null;           // different account than any cached token
+            _config.AccessTokenExpiresAt = null;
+            _config.DiscordLinked = false;        // unknown for a key login — keep Link offered
             _pi.SavePluginConfig(_config);
+            _loggedInWithKey = true;
             await _hub.StartAsync();
-            _statusLine = "Connected.";
-        }
-        catch (Exception ex) { _statusLine = $"Failed: {ex.Message}"; }
-        finally { _busy = false; }
-    }
-
-    private async Task RecoverAsync()
-    {
-        _busy = true; _statusLine = "Recovering…";
-        try
-        {
-            using var http = new HttpClient();
-            var resp = await http.PostAsJsonAsync($"{AethernetServers.AuthUrl.TrimEnd('/')}{Routes.Auth.Recover}",
-                new Dictionary<string,string> { ["recovery_secret"] = _recoverySecret });
-            resp.EnsureSuccessStatusCode();
-            var body = await resp.Content.ReadFromJsonAsync<RegisterResponseDto>();
-            if (body is null) throw new InvalidOperationException("empty response");
-            _config.Uid = body.UID; _config.SecretKey = body.SecretKey;
-            _pi.SavePluginConfig(_config);
-            _statusLine = $"Recovered as {body.UID}.";
-            await _hub.StartAsync();
+            _statusLine = _hub.DiscordLinkRequired ? "Logged in — now link Discord." : "Connected.";
         }
         catch (Exception ex) { _statusLine = $"Failed: {ex.Message}"; }
         finally { _busy = false; }

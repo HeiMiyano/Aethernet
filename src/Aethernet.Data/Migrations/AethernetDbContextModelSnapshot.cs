@@ -506,7 +506,8 @@ namespace Aethernet.Data.Migrations
                     b.HasIndex("Alias")
                         .IsUnique();
 
-                    b.HasIndex("DiscordUserId");
+                    b.HasIndex("DiscordUserId")
+                        .IsUnique();
 
                     b.HasIndex("LastSeenAt");
 

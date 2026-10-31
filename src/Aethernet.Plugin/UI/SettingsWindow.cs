@@ -17,14 +17,16 @@ public sealed class SettingsWindow : Window
     private readonly IDalamudPluginInterface _pi;
     private readonly HubConnectionService _hub;
     private readonly SyncOrchestrator _sync;
-    private string _registerRecoverySecret = string.Empty;
+    private readonly DiscordSignInService _discord;
+    private readonly FirstRunWizard _wizard;
     private DateTime _copyFeedbackUntil = DateTime.MinValue;
     private DateTime _pushFeedbackUntil = DateTime.MinValue;
 
-    public SettingsWindow(AethernetConfig config, IDalamudPluginInterface pi, HubConnectionService hub, SyncOrchestrator sync)
+    public SettingsWindow(AethernetConfig config, IDalamudPluginInterface pi, HubConnectionService hub, SyncOrchestrator sync,
+                          DiscordSignInService discord, FirstRunWizard wizard)
         : base("Aethernet Settings###AethernetSettings")
     {
-        _config = config; _pi = pi; _hub = hub; _sync = sync;
+        _config = config; _pi = pi; _hub = hub; _sync = sync; _discord = discord; _wizard = wizard;
         Size = new Vector2(540, 480);
         SizeCondition = ImGuiCond.FirstUseEver;
     }
@@ -68,9 +70,26 @@ public sealed class SettingsWindow : Window
 
             ImGui.TextDisabled($"Secret key: {(string.IsNullOrEmpty(_config.SecretKey) ? "<none>" : "set (hidden)")}");
 
-            ImGui.InputTextWithHint("##recovery", "(optional) recovery secret to reuse", ref _registerRecoverySecret, 128);
-            if (ImGui.Button("Register new account"))
-                _ = RegisterAsync(_registerRecoverySecret);
+            if (string.IsNullOrEmpty(_config.Uid))
+            {
+                DiscordSignInWidget.Draw(_discord, "Sign in with Discord", _discord.StartSignIn, "settings_signin");
+            }
+            else if (_hub.DiscordLinkRequired)
+            {
+                ImGui.TextColored(new Vector4(0.95f, 0.7f, 0.3f, 1f), "This account must be linked to Discord before it can connect.");
+                DiscordSignInWidget.Draw(_discord, "Link Discord", _discord.StartLink, "settings_link");
+            }
+            else if (!_config.DiscordLinked || _discord.IsBusy || _discord.Phase == DiscordSignInService.SignInPhase.Failed)
+            {
+                ImGui.TextWrapped("Link this account to Discord — it'll soon be required to connect, and it " +
+                                  "lets you recover the account if you lose your secret key.");
+                DiscordSignInWidget.Draw(_discord, "Link Discord", _discord.StartLink, "settings_link");
+            }
+            else if (_discord.Phase == DiscordSignInService.SignInPhase.Succeeded)
+            {
+                ImGui.TextColored(new Vector4(0.2f, 0.8f, 0.3f, 1f), "Discord linked.");
+            }
+            if (ImGui.Button("Setup wizard")) { _wizard.ShowAccountStep(); _wizard.IsOpen = true; }
             ImGui.SameLine();
             if (ImGui.Button("Reconnect")) { _ = _hub.StopAsync().ContinueWith(_ => _hub.StartAsync()); }
             ImGui.SameLine();
@@ -114,15 +133,15 @@ public sealed class SettingsWindow : Window
 
         if (ImGui.CollapsingHeader("Theming"))
         {
-            var c = _config.AccentColor;
-            if (c is null || c.Length < 4) { _config.AccentColor = new[] { 0.20f, 0.78f, 0.35f, 1.0f }; c = _config.AccentColor; }
-            var v = new System.Numerics.Vector4(c[0], c[1], c[2], c[3]);
-            if (ImGui.ColorEdit4("Accent color", ref v))
-                _config.AccentColor = new[] { v.X, v.Y, v.Z, v.W };
-
-            // Note: per-plugin UI scaling was removed — ImGui.ScaleAllSizes mutates the global
-            // style each frame, which compounds and breaks every other Dalamud plugin's UI.
-            // Use Dalamud's global "Interface Scale" in /xlsettings → Look and Feel instead.
+            // The accent-color picker that lived here was removed — it was overwriting
+            // ImGui's shared style colors every frame with nothing to revert them, which bled
+            // into Dalamud's own UI and other plugins' windows instead of staying scoped to
+            // Aethernet's. There's no color override now; Dalamud's own theme applies as-is.
+            //
+            // Per-plugin UI scaling was removed earlier for the same reason — ImGui.ScaleAllSizes
+            // mutates the global style each frame, which compounds and breaks every other
+            // Dalamud plugin's UI. Use Dalamud's global "Interface Scale" in /xlsettings →
+            // Look and Feel instead.
             ImGui.TextDisabled("UI scale is set globally — see /xlsettings → Look and Feel.");
         }
 
@@ -132,19 +151,5 @@ public sealed class SettingsWindow : Window
             _pi.SavePluginConfig(_config);
             IsOpen = false;
         }
-    }
-
-    private async Task RegisterAsync(string? recoverySecret)
-    {
-        using var http = new HttpClient();
-        var url  = $"{AethernetServers.AuthUrl.TrimEnd('/')}{Routes.Auth.Register}";
-        var resp = await http.PostAsJsonAsync(url, new RegisterRequestDto(string.IsNullOrWhiteSpace(recoverySecret) ? null : recoverySecret));
-        if (!resp.IsSuccessStatusCode) return;
-        var body = await resp.Content.ReadFromJsonAsync<RegisterResponseDto>();
-        if (body is null) return;
-        _config.Uid       = body.UID;
-        _config.SecretKey = body.SecretKey;
-        _pi.SavePluginConfig(_config);
-        await _hub.StartAsync();
     }
 }

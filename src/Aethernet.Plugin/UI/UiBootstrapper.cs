@@ -1,4 +1,5 @@
 using Aethernet.Plugin.Configuration;
+using Aethernet.Plugin.Services;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
@@ -25,14 +26,15 @@ public sealed class UiBootstrapper : IDisposable
     private readonly GroupAdminWindow _groupAdmin;
     private readonly BlockListWindow _blocks;
     private readonly FirstRunWizard _wizard;
+    private readonly HubConnectionService _hub;
 
     public UiBootstrapper(
         IDalamudPluginInterface pi, ICommandManager cmd, AethernetConfig config,
         MainWindow main, SettingsWindow settings, EditProfileWindow profile, DownloadStatusWindow downloads,
         ProfileViewerWindow profileViewer, GroupAdminWindow groupAdmin, BlockListWindow blocks,
-        FirstRunWizard wizard)
+        FirstRunWizard wizard, HubConnectionService hub)
     {
-        _pi = pi; _cmd = cmd; _config = config;
+        _pi = pi; _cmd = cmd; _config = config; _hub = hub;
         _main = main; _settings = settings; _profile = profile; _downloads = downloads;
         _profileViewer = profileViewer; _groupAdmin = groupAdmin; _blocks = blocks; _wizard = wizard;
     }
@@ -61,6 +63,15 @@ public sealed class UiBootstrapper : IDisposable
         // First-run gate: open the wizard automatically if there are no credentials.
         if (string.IsNullOrEmpty(_config.Uid) || string.IsNullOrEmpty(_config.SecretKey))
             _wizard.IsOpen = true;
+
+        // Pre-Discord account refused at login → put the Link Discord step in front of the user.
+        _hub.DiscordLinkRequiredDetected += OnDiscordLinkRequired;
+    }
+
+    private void OnDiscordLinkRequired()
+    {
+        _wizard.ShowAccountStep();
+        _wizard.IsOpen = true;
     }
 
     private void OnCommand(string _, string args)
@@ -78,6 +89,7 @@ public sealed class UiBootstrapper : IDisposable
 
     public void Dispose()
     {
+        _hub.DiscordLinkRequiredDetected -= OnDiscordLinkRequired;
         _cmd.RemoveHandler(Command);
         _pi.UiBuilder.Draw -= _windows.Draw;
         _windows.RemoveAllWindows();

@@ -5,12 +5,11 @@ using Aethernet.AuthService.Services;
 using Aethernet.Shared.Observability;
 using Aethernet.Data;
 using Aethernet.Shared.Identity;
-using AspNet.Security.OAuth.Discord;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Aethernet.AuthService.Controllers;
 
@@ -22,6 +21,7 @@ public sealed class AuthController : ControllerBase
     private readonly IRegistrationService _reg;
     private readonly IRefreshTokenService _refresh;
     private readonly IJwtIssuer _jwt;
+    private readonly DiscordOAuthOptions _discord;
     private readonly ILogger<AuthController> _log;
 
     public AuthController(
@@ -29,20 +29,23 @@ public sealed class AuthController : ControllerBase
         IRegistrationService reg,
         IRefreshTokenService refresh,
         IJwtIssuer jwt,
+        IOptions<DiscordOAuthOptions> discord,
         ILogger<AuthController> log)
     {
-        _db = db; _reg = reg; _refresh = refresh; _jwt = jwt; _log = log;
+        _db = db; _reg = reg; _refresh = refresh; _jwt = jwt; _discord = discord.Value; _log = log;
     }
 
+    private ObjectResult DiscordLinkRequired() => StatusCode(403, new AuthErrorDto(
+        AuthErrorCodes.DiscordLinkRequired,
+        "This account has to be linked to Discord before it can connect. Use Link Discord in the Aethernet plugin."));
+
+    /// <summary>Anonymous registration is gone — accounts are created only through
+    /// <see cref="DiscordAuthController"/>. Kept as an explicit 410 so old plugin builds get a
+    /// readable reason instead of a bare 404.</summary>
     [HttpPost("register")]
-    public async Task<ActionResult<RegisterResponseDto>> Register([FromBody] RegisterRequestDto body)
-    {
-        // Anonymous registration is allowed in dev; for prod you'd require Discord OAuth first.
-        var discordId = User?.FindFirstValue(ClaimTypes.NameIdentifier);
-        var result = await _reg.RegisterAsync(body, discordId);
-        AethernetMetrics.AuthRegistrations.WithLabels(string.IsNullOrEmpty(discordId) ? "anonymous" : "discord").Inc();
-        return Ok(result);
-    }
+    public IActionResult Register() =>
+        StatusCode(StatusCodes.Status410Gone, new AuthErrorDto(AuthErrorCodes.RegistrationDisabled,
+            "New accounts are created with Discord. Update the Aethernet plugin and use Sign in with Discord."));
 
     [HttpPost("login")]
     public async Task<ActionResult<LoginResponseDto>> Login([FromBody] LoginRequestDto body)
@@ -50,6 +53,12 @@ public sealed class AuthController : ControllerBase
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Uid == body.UID);
         if (user is null || user.IsBanned) { AethernetMetrics.AuthLoginAttempts.WithLabels("banned_or_missing").Inc(); return Unauthorized(); }
         if (!SecretKeyHasher.Verify(body.SecretKey, user.SecretKeyHash)) { AethernetMetrics.AuthLoginAttempts.WithLabels("bad_secret").Inc(); return Unauthorized(); }
+        // Checked only after the secret verifies, so link status isn't revealed to non-owners.
+        if (_discord.RequireLinkedAccount && string.IsNullOrEmpty(user.DiscordUserId))
+        {
+            AethernetMetrics.AuthLoginAttempts.WithLabels("discord_link_required").Inc();
+            return DiscordLinkRequired();
+        }
         AethernetMetrics.AuthLoginAttempts.WithLabels("success").Inc();
 
         var (token, expires) = _jwt.IssueAccessToken(user.Uid, user.IsAdmin, user.IsModerator);
@@ -74,6 +83,8 @@ public sealed class AuthController : ControllerBase
         var tokenId = newRefresh.Split('.', 2)[0];
         var row = await _db.RefreshTokens.AsNoTracking().FirstAsync(t => t.TokenId == tokenId);
         var user = await _db.Users.AsNoTracking().FirstAsync(u => u.Uid == row.Uid);
+        if (user.IsBanned) return Unauthorized();
+        if (_discord.RequireLinkedAccount && string.IsNullOrEmpty(user.DiscordUserId)) return DiscordLinkRequired();
 
         var (token, expires) = _jwt.IssueAccessToken(user.Uid, user.IsAdmin, user.IsModerator);
         return Ok(new LoginResponseDto(token, newRefresh, (int)(expires - DateTime.UtcNow).TotalSeconds));
@@ -120,75 +131,4 @@ public sealed class AuthController : ControllerBase
         var uid = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
         return Ok(await _reg.RotateSecretAsync(uid));
     }
-
-    // ---- Discord OAuth ----------------------------------------------------
-
-    [HttpGet("oauth/discord")]
-    public IActionResult DiscordStart([FromQuery] string? returnUrl = null) =>
-        Challenge(new AuthenticationProperties { RedirectUri = returnUrl ?? "/auth/oauth/discord/cb" },
-                  DiscordAuthenticationDefaults.AuthenticationScheme);
-
-    [HttpGet("oauth/discord/cb")]
-    public async Task<IActionResult> DiscordCallback()
-    {
-        var auth = await HttpContext.AuthenticateAsync(DiscordAuthenticationDefaults.AuthenticationScheme);
-        if (!auth.Succeeded) return Unauthorized();
-        var discordId = auth.Principal!.FindFirstValue(ClaimTypes.NameIdentifier)!;
-        var result = await _reg.RegisterAsync(new RegisterRequestDto(null), discordId);
-        Response.ContentType = "text/html; charset=utf-8";
-        return Content(SuccessPageHtml(result.UID, result.SecretKey));
-    }
-
-    private static string SuccessPageHtml(string uid, string secretKey) => @"<!doctype html>
-<html lang=""en""><head><meta charset=""utf-8"">
-<title>Aethernet — account created</title>
-<style>
-  :root { color-scheme: dark light; }
-  body { font-family: system-ui, -apple-system, sans-serif; max-width: 640px; margin: 4rem auto;
-         padding: 0 1rem; line-height: 1.5; }
-  h1 { margin-bottom: 0.25rem; }
-  .sub { color: #888; margin-bottom: 2rem; }
-  .card { background: #f4f4f7; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
-  @media (prefers-color-scheme: dark) { .card { background: #1c1c1f; } }
-  .label { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: #888; }
-  .value { font-family: ui-monospace, SF Mono, Menlo, monospace; font-size: 1.1rem;
-           overflow-wrap: anywhere; padding: .25rem 0; }
-  button { background: #4a90e2; color: white; border: none; padding: .4rem .9rem;
-           border-radius: 6px; cursor: pointer; font-size: .9rem; }
-  button:hover { background: #357ab8; }
-  .warn { border-left: 3px solid #d97706; padding-left: .75rem; color: #92400e; }
-  @media (prefers-color-scheme: dark) { .warn { color: #fbbf24; } }
-</style>
-</head><body>
-  <h1>Account created</h1>
-  <p class=""sub"">Save both of these values now. The secret key will <strong>never be shown again</strong>.</p>
-
-  <div class=""card"">
-    <div class=""label"">User ID (UID)</div>
-    <div class=""value"" id=""uid"">__UID__</div>
-    <button onclick=""copy('uid')"">Copy UID</button>
-  </div>
-
-  <div class=""card"">
-    <div class=""label"">Secret key</div>
-    <div class=""value"" id=""key"">__KEY__</div>
-    <button onclick=""copy('key')"">Copy secret key</button>
-  </div>
-
-  <p class=""warn"">Anyone with your secret key can sign in as you. Treat it like a password.
-     Paste both values into Aethernet → Settings → Account, then close this tab.</p>
-
-  <script>
-    function copy(id) {
-      const t = document.getElementById(id).innerText;
-      navigator.clipboard.writeText(t).then(() => {
-        const b = event.target;
-        const orig = b.innerText;
-        b.innerText = 'Copied';
-        setTimeout(() => b.innerText = orig, 1200);
-      });
-    }
-  </script>
-</body></html>".Replace("__UID__", System.Net.WebUtility.HtmlEncode(uid))
-              .Replace("__KEY__", System.Net.WebUtility.HtmlEncode(secretKey));
 }

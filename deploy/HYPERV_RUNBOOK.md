@@ -139,9 +139,14 @@ container; we just need the token.
 
    | Subdomain | Domain        | Service type | URL          |
    |-----------|---------------|--------------|--------------|
-   | `auth.aethernet`  | heimiyano.com | HTTP | `auth:8080`  |
-   | `hub.aethernet`   | heimiyano.com | HTTP | `hub:8080`   |
-   | `files.aethernet` | heimiyano.com | HTTP | `files:8080` |
+   | `auth-aethernet`  | heimiyano.com | HTTP | `auth:8080`  |
+   | `hub-aethernet`   | heimiyano.com | HTTP | `hub:8080`   |
+   | `files-aethernet` | heimiyano.com | HTTP | `files:8080` |
+
+   Use a hyphen, not a dot, in the Subdomain field (`auth-aethernet`, not `auth.aethernet`) —
+   Cloudflare's automatic Universal SSL certificate only covers the apex domain plus one
+   level of wildcard (`*.heimiyano.com`), so a two-level nested subdomain like
+   `auth.aethernet.heimiyano.com` would never get a valid cert.
 
    For each: select **Add a public hostname** → fill in **Subdomain** and pick the
    **Domain** → leave Path blank → **Service**: HTTP, URL is the container name + port.
@@ -227,14 +232,14 @@ You should see the `users`, `pairs`, `groups`, etc. tables.
 
 ```powershell
 # Auth: should return JSON with UID + SecretKey + RecoverySecret
-curl.exe -X POST https://auth.aethernet.heimiyano.com/auth/register `
+curl.exe -X POST https://auth-aethernet.heimiyano.com/auth/register `
   -H "Content-Type: application/json" -d "{}"
 
 # Hub: protocolVersion + build + motd
-curl.exe https://hub.aethernet.heimiyano.com/api/info
+curl.exe https://hub-aethernet.heimiyano.com/api/info
 
 # File server: "Healthy"
-curl.exe https://files.aethernet.heimiyano.com/healthz
+curl.exe https://files-aethernet.heimiyano.com/healthz
 ```
 
 All three return 200 over HTTPS. The TLS cert is Cloudflare's edge cert — your
@@ -247,9 +252,9 @@ On each player's machine, in-game: `/aethernet settings` → Account section:
 
 | Field           | Value                                          |
 |-----------------|------------------------------------------------|
-| Auth server URL | `https://auth.aethernet.heimiyano.com`         |
-| Hub server URL  | `https://hub.aethernet.heimiyano.com`          |
-| File server URL | `https://files.aethernet.heimiyano.com`        |
+| Auth server URL | `https://auth-aethernet.heimiyano.com`         |
+| Hub server URL  | `https://hub-aethernet.heimiyano.com`          |
+| File server URL | `https://files-aethernet.heimiyano.com`        |
 
 Save → reconnect. Green dot reappears within a few seconds. Your friend installs
 the plugin (`Copy-Item src\Aethernet.Plugin\bin\Release\* $env:APPDATA\XIVLauncher\devPlugins\Aethernet`)

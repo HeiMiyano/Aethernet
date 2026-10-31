@@ -19,6 +19,10 @@ public sealed class AethernetConfig : IPluginConfiguration
     public string? AccessToken      { get; set; } // last issued JWT
     public string? RefreshToken     { get; set; }
     public DateTime? AccessTokenExpiresAt { get; set; }
+    /// <summary>Known to be linked to Discord (signed in with Discord, linked, or the server said
+    /// "already linked"). False for pre-Discord configs, which is what keeps the Link Discord
+    /// button visible in Settings until the account is actually linked.</summary>
+    public bool DiscordLinked { get; set; }
 
     // ---- behaviour ----
     public bool   AutoConnectOnStartup     { get; set; } = true;
@@ -58,10 +62,13 @@ public sealed class AethernetConfig : IPluginConfiguration
     public bool ShowMainWindow             { get; set; } = true;
 
     // ---- theming ----
-    /// <summary>RGBA accent color used for highlights, the connected dot, and button hover. Defaults to a calm blue.</summary>
-    public float[] AccentColor { get; set; } = new[] { 0.20f, 0.78f, 0.35f, 1.0f };
-    // UiScale was removed — it mutated the global ImGui style every frame, which compounded
-    // across frames and broke every other plugin's UI. Use Dalamud's "Interface Scale" in
-    // /xlsettings → Look and Feel for per-user UI scaling instead.
-    // Old configs with "UiScale": <n> JSON deserialize fine; the property is just dropped.
+    // AccentColor (and the ThemeApplier that read it) was removed — it mutated ImGui's shared
+    // GetStyle().Colors array directly every frame, with nothing ever reverting it, so it bled
+    // into Dalamud's own UI and every other plugin's windows rather than staying scoped to
+    // Aethernet's. There is no in-plugin color override now; Dalamud's own theme applies as-is.
+    // UiScale was removed earlier for the same class of reason — it mutated the global ImGui
+    // style every frame, which compounded across frames and broke every other plugin's UI. Use
+    // Dalamud's "Interface Scale" in /xlsettings → Look and Feel for per-user UI scaling instead.
+    // Old configs with "AccentColor": [...] or "UiScale": <n> JSON deserialize fine; the
+    // properties are just dropped.
 }

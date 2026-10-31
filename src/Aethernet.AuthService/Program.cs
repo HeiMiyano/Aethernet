@@ -2,7 +2,6 @@ using System.Text;
 using Aethernet.API;
 using Aethernet.AuthService.Services;
 using Aethernet.Data;
-using AspNet.Security.OAuth.Discord;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -41,22 +40,17 @@ var authBuilder = builder.Services.AddAuthentication(o =>
     };
 });
 
-// Only wire up Discord OAuth if it's actually configured. The OAuthOptions validator
-// runs eagerly during AuthenticationMiddleware.InitializeAsync — registering the handler
-// with empty credentials crashes every request, not just OAuth requests.
-var discordClientId = builder.Configuration["Discord:ClientId"];
-var discordSecret   = builder.Configuration["Discord:ClientSecret"];
-if (!string.IsNullOrWhiteSpace(discordClientId) && !string.IsNullOrWhiteSpace(discordSecret))
+// Discord is the only way to create an account (see DiscordAuthController). The OAuth flow is
+// hand-rolled rather than using the ASP.NET Discord handler, because the browser that authorizes
+// isn't the client that ends up holding the credentials — the plugin is.
+builder.Services.Configure<DiscordOAuthOptions>(builder.Configuration.GetSection("Discord"));
+builder.Services.AddSingleton<DiscordSignInStore>();
+builder.Services.AddHttpClient<DiscordOAuthClient>(c =>
 {
-    authBuilder
-        .AddCookie() // needed by the Discord OAuth handler for state correlation
-        .AddDiscord(o =>
-        {
-            o.ClientId     = discordClientId;
-            o.ClientSecret = discordSecret;
-            o.Scope.Add("identify");
-        });
-}
+    c.Timeout = TimeSpan.FromSeconds(15);
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("DiscordBot (https://github.com/HeiMiyano/Aethernet, 1.0)");
+});
+
 builder.Services.AddAuthorization();
 
 // The web moderation dashboard is served by Aethernet.Server (a different origin/subdomain in
@@ -73,6 +67,14 @@ builder.Services.AddControllers();
 builder.Services.AddHealthChecks().AddDbContextCheck<AethernetDbContext>("postgres");
 
 var app = builder.Build();
+
+var discordOpt = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<DiscordOAuthOptions>>().Value;
+if (!discordOpt.IsConfigured)
+    app.Logger.LogWarning("Discord sign-in is NOT configured (Discord:ClientId / ClientSecret / RedirectUri) — nobody can create an account until it is.");
+else
+    app.Logger.LogInformation("Discord sign-in enabled. Redirect URI {RedirectUri}; required guild {Guild}; link required to log in: {RequireLink}",
+        discordOpt.RedirectUri, string.IsNullOrWhiteSpace(discordOpt.RequiredGuildId) ? "(none)" : discordOpt.RequiredGuildId,
+        discordOpt.RequireLinkedAccount);
 
 app.UseSerilogRequestLogging();
 app.UseCors("AdminDashboard");

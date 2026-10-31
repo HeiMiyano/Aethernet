@@ -39,6 +39,17 @@ public sealed class HubConnectionService : IAsyncDisposable
     public HubConnectionState State => _hub?.State ?? HubConnectionState.Disconnected;
     public event Action<HubConnectionState>? StateChanged;
 
+    /// <summary>True when the last login was refused because this (pre-Discord) account hasn't
+    /// been linked to Discord yet. Cleared by the next successful login.</summary>
+    public bool DiscordLinkRequired { get; private set; }
+    /// <summary>Raised (off the UI thread) when a login comes back discord_link_required.</summary>
+    public event Action? DiscordLinkRequiredDetected;
+
+    private sealed class DiscordLinkRequiredException : Exception
+    {
+        public DiscordLinkRequiredException() : base("Account must be linked to Discord before connecting.") { }
+    }
+
     public HubConnectionService(
         AethernetConfig config,
         IDalamudPluginInterface pi,
@@ -137,7 +148,7 @@ public sealed class HubConnectionService : IAsyncDisposable
     {
         if (string.IsNullOrEmpty(_config.Uid) || string.IsNullOrEmpty(_config.SecretKey))
         {
-            _log.LogInformation("No credentials configured — staying offline. Open the Aethernet window to register.");
+            _log.LogInformation("No credentials configured — staying offline. Open /aethernet wizard and sign in with Discord.");
             return;
         }
 
@@ -196,6 +207,11 @@ public sealed class HubConnectionService : IAsyncDisposable
             // across pod restarts, etc.) can leave a pair stuck in a wrong state until BOTH
             // sides bounce the plugin. Re-fetching every 30s caps the worst-case staleness.
             _ = RunOnlinePairsPollerAsync(_cts.Token);
+        }
+        catch (DiscordLinkRequiredException)
+        {
+            _log.LogWarning("Login refused: this account must be linked to Discord first (Settings → Link Discord).");
+            Notify(HubConnectionState.Disconnected);
         }
         catch (Exception ex)
         {
@@ -264,7 +280,20 @@ public sealed class HubConnectionService : IAsyncDisposable
             $"{AethernetServers.AuthUrl.TrimEnd('/')}{Routes.Auth.Login}",
             new LoginRequestDto(_config.Uid!, _config.SecretKey!),
             _cts.Token);
+        if (resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            AuthErrorDto? err = null;
+            try { err = await resp.Content.ReadFromJsonAsync<AuthErrorDto>(cancellationToken: _cts.Token); }
+            catch { /* not our error shape */ }
+            if (err?.Error == AuthErrorCodes.DiscordLinkRequired)
+            {
+                DiscordLinkRequired = true;
+                DiscordLinkRequiredDetected?.Invoke();
+                throw new DiscordLinkRequiredException();
+            }
+        }
         resp.EnsureSuccessStatusCode();
+        DiscordLinkRequired = false;
         var login = await resp.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: _cts.Token)
                     ?? throw new InvalidOperationException("empty login response");
 

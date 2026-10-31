@@ -68,6 +68,7 @@ public sealed class AethernetPlugin : IDalamudPlugin
         // ---- core services ----
         services.AddSingleton<FileCacheService>();
         services.AddSingleton<HubConnectionService>();
+        services.AddSingleton<DiscordSignInService>();
         services.AddSingleton<FileTransferService>();
         services.AddSingleton<CharacterDataCollector>();
         services.AddSingleton<CharacterDataApplier>();
@@ -88,7 +89,6 @@ public sealed class AethernetPlugin : IDalamudPlugin
         services.AddSingleton<BlockListWindow>();
         services.AddSingleton<FirstRunWizard>();
         services.AddSingleton<UiBootstrapper>();
-        services.AddSingleton<ThemeApplier>();
         services.AddSingleton<DownloadOverlay>();
         services.AddSingleton<UploadOverlay>();
 
@@ -104,7 +104,6 @@ public sealed class AethernetPlugin : IDalamudPlugin
         _services.GetRequiredService<ZoneObserver>();
         _services.GetRequiredService<SyncOrchestrator>();
         _services.GetRequiredService<NameplateDecorator>();
-        _services.GetRequiredService<ThemeApplier>();
 
         _ = _services.GetRequiredService<HubConnectionService>().StartAsync();
     }

@@ -25,7 +25,9 @@ public class AethernetDbContext : DbContext
         b.Entity<UserEntity>(e =>
         {
             e.HasIndex(x => x.Alias).IsUnique();
-            e.HasIndex(x => x.DiscordUserId);
+            // Strict 1 Discord account <-> 1 Aethernet account. Postgres unique indexes allow any
+            // number of NULLs, so unlinked (pre-Discord) accounts are unaffected.
+            e.HasIndex(x => x.DiscordUserId).IsUnique();
             e.HasIndex(x => x.LastSeenAt);
         });
 

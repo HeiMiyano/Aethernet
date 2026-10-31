@@ -22,6 +22,7 @@ public sealed class MainWindow : Window
     private readonly GroupAdminWindow _groupAdmin;
     private readonly AethernetConfig _config;
     private readonly Dalamud.Plugin.IDalamudPluginInterface _pi;
+    private readonly DiscordSignInService _discord;
 
     private string _addPairUid = string.Empty;
     private string _joinGroupGid = string.Empty;
@@ -46,11 +47,12 @@ public sealed class MainWindow : Window
     public MainWindow(
         HubConnectionService hub, PairManager pairs, GroupManager groups, VisibleUserManager visible,
         ProfileViewerWindow profileViewer, GroupAdminWindow groupAdmin, AethernetConfig config,
-        Dalamud.Plugin.IDalamudPluginInterface pi)
+        Dalamud.Plugin.IDalamudPluginInterface pi, DiscordSignInService discord)
         : base("Aethernet###Aethernet")
     {
         _hub = hub; _pairs = pairs; _groups = groups; _visible = visible;
         _profileViewer = profileViewer; _groupAdmin = groupAdmin; _config = config; _pi = pi;
+        _discord = discord;
         Size = new Vector2(420, 560);
         SizeCondition = ImGuiCond.FirstUseEver;
     }
@@ -157,6 +159,15 @@ public sealed class MainWindow : Window
         ImGui.TextColored(color, $"● {label}");
         ImGui.SameLine();
         ImGui.TextDisabled($"protocol v{AethernetConstants.ProtocolVersion}");
+
+        if (_hub.DiscordLinkRequired)
+        {
+            ImGui.TextColored(new Vector4(0.95f, 0.7f, 0.3f, 1f), "Link Discord to connect");
+            ImGui.TextWrapped("This account was created before Discord sign-in and has to be linked to " +
+                              "Discord before the server will let it connect. Your UID and pairs stay the same.");
+            DiscordSignInWidget.Draw(_discord, "Link Discord", _discord.StartLink, "main_link");
+            ImGui.Separator();
+        }
 
         // Your UID + Copy button — exposed prominently so friends can grab it for pairing.
         if (!string.IsNullOrEmpty(_config.Uid))

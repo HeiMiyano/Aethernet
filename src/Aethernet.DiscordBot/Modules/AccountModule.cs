@@ -10,7 +10,9 @@ using Microsoft.Extensions.Configuration;
 namespace Aethernet.DiscordBot.Modules;
 
 /// <summary>
-/// Discord-first signup + bot-DM recovery. This is the bot half of account management — the
+/// Bot-DM recovery and account status. Accounts themselves are created only by "Sign in with
+/// Discord" in the plugin (AuthService's DiscordAuthController) — there's deliberately no
+/// /register here, so there's exactly one signup path. This is the bot half of account management — the
 /// account itself still lives in the same Postgres database the other three services use; the
 /// bot talks to it directly (same pattern as AdminController/AethernetHub reaching the DB
 /// straight from the Server project, rather than hopping through AuthService's HTTP API).
@@ -25,48 +27,12 @@ public sealed class AccountModule : InteractionModuleBase<SocketInteractionConte
 
     private string DiscordId => Context.User.Id.ToString();
 
+    private const string NoAccountMessage =
+        "No Aethernet account is linked to your Discord account. In game, open `/aethernet wizard` and " +
+        "click **Sign in with Discord** to create one (or **Link Discord** if you already have an account).";
+
     private int ClaimLifetimeMinutes =>
         int.TryParse(_cfg["Discord:ClaimTokenLifetimeMinutes"], out var m) ? m : 15;
-
-    [SlashCommand("register", "Create a new Aethernet account linked to your Discord account.")]
-    public async Task RegisterAsync()
-    {
-        await DeferAsync(ephemeral: true);
-
-        var existing = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.DiscordUserId == DiscordId);
-        if (existing is not null)
-        {
-            await FollowupAsync(
-                $"You already have an Aethernet account linked (UID `{existing.Uid}`). " +
-                "Lost the secret key? Use `/recover` instead.", ephemeral: true);
-            return;
-        }
-
-        var uid      = UidGenerator.NewUid();
-        var key      = UidGenerator.NewSecretKey();
-        var recovery = UidGenerator.NewRecoverySecret();
-
-        _db.Users.Add(new UserEntity
-        {
-            Uid                = uid,
-            SecretKeyHash      = SecretKeyHasher.Hash(key),
-            RecoverySecretHash = SecretKeyHasher.Hash(recovery),
-            DiscordUserId      = DiscordId,
-            CreatedAt          = DateTime.UtcNow,
-            LastSeenAt         = DateTime.UtcNow,
-        });
-        await _db.SaveChangesAsync();
-
-        var body =
-            $"**Aethernet account created**\nUID: `{uid}`\nSecret key: `{key}`\n\n" +
-            "Save both now — the secret key will never be shown again. Paste them into the " +
-            "plugin's Settings → Account tab. If you ever lose the secret key, come back " +
-            "here and run `/recover`.";
-        if (await TryDmAsync(body))
-            await FollowupAsync("Account created — check your DMs for the UID and secret key.", ephemeral: true);
-        else
-            await FollowupAsync($"Account created, but I couldn't DM you (check your Discord privacy settings).\n{body}", ephemeral: true);
-    }
 
     [SlashCommand("recover", "DM yourself a one-time recovery token for your linked Aethernet account.")]
     public async Task RecoverAsync()
@@ -76,7 +42,7 @@ public sealed class AccountModule : InteractionModuleBase<SocketInteractionConte
         var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.DiscordUserId == DiscordId);
         if (user is null)
         {
-            await FollowupAsync("No Aethernet account is linked to your Discord account. Use `/register` first.", ephemeral: true);
+            await FollowupAsync(NoAccountMessage, ephemeral: true);
             return;
         }
         if (user.IsBanned)
@@ -150,7 +116,7 @@ public sealed class AccountModule : InteractionModuleBase<SocketInteractionConte
         var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.DiscordUserId == DiscordId);
         if (user is null)
         {
-            await FollowupAsync("No Aethernet account is linked to your Discord account. Use `/register`.", ephemeral: true);
+            await FollowupAsync(NoAccountMessage, ephemeral: true);
             return;
         }
 
@@ -175,8 +141,8 @@ public sealed class AccountModule : InteractionModuleBase<SocketInteractionConte
         user.DiscordUserId = null;
         await _db.SaveChangesAsync();
         await FollowupAsync(
-            $"Unlinked UID `{user.Uid}` from your Discord account. `/recover` and `/claim` won't work for it " +
-            "until it's linked again (via Discord OAuth on the web login, or by an admin).", ephemeral: true);
+            $"Unlinked UID `{user.Uid}` from your Discord account. That account can't connect until it's " +
+            "linked to a Discord account again — use **Link Discord** in the Aethernet plugin.", ephemeral: true);
     }
 
     private async Task<bool> TryDmAsync(string message)

@@ -42,6 +42,15 @@ services:
       # Optional: leave blank to disable Discord OAuth.
       Discord__ClientId:     ${DISCORD_CLIENT_ID:-}
       Discord__ClientSecret: ${DISCORD_CLIENT_SECRET:-}
+      # Discord is the ONLY way to create an account. Register this exact URL under
+      # Developer Portal -> OAuth2 -> Redirects (AUTH_PUBLIC_URL must have no trailing slash).
+      Discord__RedirectUri:          ${AUTH_PUBLIC_URL:-}/auth/discord/callback
+      # Same server the bot lives in; blank = any Discord user can sign up.
+      Discord__RequiredGuildId:      ${DISCORD_GUILD_ID:-}
+      Discord__InviteUrl:            ${DISCORD_INVITE_URL:-}
+      # Flip to true only AFTER a plugin build with the "Link Discord" button is released —
+      # otherwise pre-Discord accounts get locked out with no way to link.
+      Discord__RequireLinkedAccount: ${DISCORD_REQUIRE_LINK:-false}
       # Admin moderation dashboard (served by the hub) calls /auth/login
       # cross-origin from its own URL — needs to be allow-listed here. Leave
       # blank to leave the dashboard's login broken (CORS-rejected).
