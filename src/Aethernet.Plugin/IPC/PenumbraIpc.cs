@@ -20,7 +20,6 @@ public sealed class PenumbraIpc : IDisposable
     private const string GetEnabledStateLabel    = "Penumbra.GetEnabledState";
     private const string GetModDirectoryLabel    = "Penumbra.GetModDirectory";
     private const string GetGameObjectResourcesLabel = "Penumbra.GetGameObjectResourcePaths.V5";
-    private const string GetPlayerResourcesLabel     = "Penumbra.GetPlayerResourcePaths.V5";
     // Labels verified against Penumbra.Api.dll dump 2026-06-14:
     //   CreateTemporaryCollection is V6 (was V5, also dropped "Named")
     //   RedrawObject is V5 (we were using unversioned)
@@ -442,18 +441,10 @@ public sealed class PenumbraIpc : IDisposable
     private Func<int, IReadOnlyDictionary<string, string>>? _resourcePathsInvoker;
     public IReadOnlyDictionary<string, string> GetResourcePaths(int objectIndex)
     {
-        // For the local player (idx 0), prefer GetPlayerResourcePaths.V5 — it returns
-        // post-mod-resolution paths (actual modded files), unlike GetGameObjectResourcePaths
-        // which may report raw game paths.
-        if (objectIndex == 0)
-        {
-            var playerPaths = TryGetPlayerResourcePaths();
-            // Fall through to GameObject API when Player is null or empty — the histogram
-            // diagnostic in CollectForObject needs the full GameObject list to identify which
-            // race-coded paths the character is actually loading.
-            if (playerPaths is { Count: > 0 }) return playerPaths;
-        }
-
+        // Always GetGameObjectResourcePaths.V5, including for the local player. (GetPlayerResourcePaths.V5
+        // returns Dictionary<ushort, Dictionary<string, HashSet<string>>> for EVERY player-owned object,
+        // so using it here built trees for minions/mounts on every collect just to read slot 0 —
+        // and the old shape-probe never matched that type, logging five warnings per session.)
         _resourcePathsInvoker ??= ResolveResourcePathsInvoker(objectIndex);
         if (_resourcePathsInvoker is null) return new Dictionary<string, string>();
         try { return _resourcePathsInvoker(objectIndex); }
@@ -462,104 +453,6 @@ public sealed class PenumbraIpc : IDisposable
             _log.LogWarning("GetResourcePaths failed for objectIndex={Idx}: {Msg}", objectIndex, ex.Message);
             return new Dictionary<string, string>();
         }
-    }
-
-    private bool _playerPathsUnavailable;
-    private Func<IReadOnlyDictionary<string, string>>? _playerPathsInvoker;
-
-    private IReadOnlyDictionary<string, string>? TryGetPlayerResourcePaths()
-    {
-        if (_playerPathsUnavailable) return null;
-        _playerPathsInvoker ??= ResolvePlayerPathsInvoker();
-        if (_playerPathsInvoker is null) { _playerPathsUnavailable = true; return null; }
-        try { return _playerPathsInvoker(); }
-        catch (Exception ex)
-        {
-            _log.LogWarning("GetPlayerResourcePaths.V5 call failed: {Msg}", ex.Message);
-            return null;
-        }
-    }
-
-    private Func<IReadOnlyDictionary<string, string>>? ResolvePlayerPathsInvoker()
-    {
-        // Penumbra's GetPlayerResourcePaths.V5 returns Dictionary<,> but we have to find
-        // the exact value type. Try common shapes; first success wins.
-        var attempts = new (string Shape, Func<Func<IReadOnlyDictionary<string, string>>> Build)[]
-        {
-            ("Dictionary<string, HashSet<string>>", () => {
-                var s = _pi.GetIpcSubscriber<Dictionary<string, HashSet<string>>>(GetPlayerResourcesLabel);
-                return () => FlattenHashSetDict(s.InvokeFunc());
-            }),
-            ("Dictionary<string, string[]>", () => {
-                var s = _pi.GetIpcSubscriber<Dictionary<string, string[]>>(GetPlayerResourcesLabel);
-                return () => FlattenStringArrayDict(s.InvokeFunc());
-            }),
-            // Maybe key is something other than string:
-            ("Dictionary<int, HashSet<string>>", () => {
-                var s = _pi.GetIpcSubscriber<Dictionary<int, HashSet<string>>>(GetPlayerResourcesLabel);
-                return () => {
-                    var raw = s.InvokeFunc();
-                    if (raw is null) return new Dictionary<string, string>();
-                    var flat = new Dictionary<string, string>(raw.Count);
-                    foreach (var (k, vs) in raw)
-                    {
-                        var first = vs.FirstOrDefault();
-                        if (!string.IsNullOrEmpty(first)) flat[k.ToString()] = first;
-                    }
-                    return flat;
-                };
-            }),
-            // Maybe player API returns an array of dicts like GameObject does:
-            ("Dictionary<string, HashSet<string>>?[]", () => {
-                var s = _pi.GetIpcSubscriber<Dictionary<string, HashSet<string>>?[]>(GetPlayerResourcesLabel);
-                return () => {
-                    var arr = s.InvokeFunc();
-                    return FlattenHashSetDict(arr is { Length: > 0 } ? arr[0] : null);
-                };
-            }),
-            // Or arrays with string[]:
-            ("Dictionary<string, string[]>?[]", () => {
-                var s = _pi.GetIpcSubscriber<Dictionary<string, string[]>?[]>(GetPlayerResourcesLabel);
-                return () => {
-                    var arr = s.InvokeFunc();
-                    return FlattenStringArrayDict(arr is { Length: > 0 } ? arr[0] : null);
-                };
-            }),
-            // Maybe the value is a tuple — Penumbra sometimes wraps:
-            ("Dictionary<string, (string, string)>", () => {
-                var s = _pi.GetIpcSubscriber<Dictionary<string, (string, string)>>(GetPlayerResourcesLabel);
-                return () => {
-                    var raw = s.InvokeFunc();
-                    if (raw is null) return new Dictionary<string, string>();
-                    var flat = new Dictionary<string, string>(raw.Count, StringComparer.OrdinalIgnoreCase);
-                    foreach (var (k, tup) in raw)
-                        if (!string.IsNullOrEmpty(tup.Item1)) flat[k] = tup.Item1;
-                    return flat;
-                };
-            }),
-            // Maybe the entire thing is wrapped in an outer tuple (like Glamourer's status pattern):
-            ("(int, Dictionary<string, HashSet<string>>)", () => {
-                var s = _pi.GetIpcSubscriber<(int, Dictionary<string, HashSet<string>>)>(GetPlayerResourcesLabel);
-                return () => FlattenHashSetDict(s.InvokeFunc().Item2);
-            }),
-        };
-
-        foreach (var (shape, build) in attempts)
-        {
-            try
-            {
-                var invoker = build();
-                var test = invoker();  // probe-call to confirm shape
-                _log.LogInformation("GetPlayerResourcePaths.V5 bound with {Shape}, probe returned {N} entries", shape, test.Count);
-                return invoker;
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning("GetPlayerResourcePaths.V5 shape {Shape} rejected: {Msg}", shape, ex.Message);
-            }
-        }
-        _log.LogWarning("GetPlayerResourcePaths.V5: no signature shape bound");
-        return null;
     }
 
     // Penumbra V5's dictionary semantics: KEY = actual on-disk file path, VALUE = set of
@@ -579,20 +472,6 @@ public sealed class PenumbraIpc : IDisposable
         }
         return flat;
     }
-    private static IReadOnlyDictionary<string, string> FlattenStringArrayDict(Dictionary<string, string[]>? raw)
-    {
-        if (raw is null) return new Dictionary<string, string>();
-        var flat = new Dictionary<string, string>(raw.Count, StringComparer.OrdinalIgnoreCase);
-        foreach (var (actualFile, gamePaths) in raw)
-        {
-            foreach (var gamePath in gamePaths)
-            {
-                if (!string.IsNullOrEmpty(gamePath)) flat[gamePath] = actualFile;
-            }
-        }
-        return flat;
-    }
-
     private Func<int, IReadOnlyDictionary<string, string>>? ResolveResourcePathsInvoker(int sampleIdx)
     {
         // Penumbra V5 dict semantics: KEY = actual on-disk file, VALUE = set of game paths

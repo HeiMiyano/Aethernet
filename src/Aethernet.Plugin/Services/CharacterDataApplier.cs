@@ -139,7 +139,13 @@ public sealed class CharacterDataApplier
                 }
 
                 if (data.GlamourerData     is not null && _glamourer.IsAvailable) _glamourer.ApplyState(data.GlamourerData, visible.ObjectIndex);
-                if (data.CustomizePlusData is not null && _customize.IsAvailable) _customize.ApplyProfile(visible.ObjectIndex, data.CustomizePlusData);
+                if (_customize.IsAvailable)
+                {
+                    // Clear our temp profile when the pair no longer has one (or it's blocked by
+                    // permissions) so old scaling doesn't stick to their character.
+                    if (data.CustomizePlusData is not null) _customize.ApplyProfile(visible.ObjectIndex, data.CustomizePlusData);
+                    else _customize.RemoveProfile(visible.ObjectIndex);
+                }
                 if (data.HonorificTitle    is not null && _honorific.IsAvailable) _honorific.ApplyTitle(visible.ObjectIndex, data.HonorificTitle);
                 if (data.HeelsOffset       is not null && _heels.IsAvailable)     _heels.RegisterOffset(visible.ObjectIndex, data.HeelsOffset);
                 if (data.MoodlesData       is not null && _moodles.IsAvailable)   _moodles.ApplyStatus(visible.Address, data.MoodlesData);

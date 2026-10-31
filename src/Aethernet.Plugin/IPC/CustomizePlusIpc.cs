@@ -3,13 +3,30 @@ using Microsoft.Extensions.Logging;
 
 namespace Aethernet.Plugin.IPC;
 
-/// <summary>Bridge to Customize+ for body/face scaling profiles.</summary>
+/// <summary>
+/// Bridge to Customize+ for body/face scaling profiles.
+///
+/// Signatures verified against CustomizePlus.dll 2.2.1.3 (CustomizePlus.Api.CustomizePlusIpc):
+///   Profile.GetActiveProfileIdOnCharacter (ushort gameObjectIndex)            → (int, Guid?)
+///   Profile.GetByUniqueId                 (Guid uniqueId)                     → (int, string)
+///   Profile.SetTemporaryProfileOnCharacter(ushort gameObjectIndex, string json) → (int, Guid?)
+///   Profile.DeleteTemporaryProfileOnCharacter(ushort gameObjectIndex)         → int
+/// The int is CustomizePlus.Api.Enums.ErrorCode. Older Aethernet builds called a
+/// "Profile.GetActiveProfile" label that no longer exists, and passed int indices / invoked the
+/// setters as actions, so Customize+ data never synced in either direction.
+/// </summary>
 public sealed class CustomizePlusIpc
 {
-    private const string ApiVersionLabel = "CustomizePlus.General.GetApiVersion";
-    private const string GetActiveProfileLabel = "CustomizePlus.Profile.GetActiveProfile";
-    private const string SetTemporaryProfileLabel = "CustomizePlus.Profile.SetTemporaryProfileOnCharacter";
-    private const string DeleteTemporaryProfileLabel = "CustomizePlus.Profile.DeleteTemporaryProfileOnCharacter";
+    private const string ApiVersionLabel              = "CustomizePlus.General.GetApiVersion";
+    private const string GetActiveProfileIdLabel      = "CustomizePlus.Profile.GetActiveProfileIdOnCharacter";
+    private const string GetProfileByUniqueIdLabel    = "CustomizePlus.Profile.GetByUniqueId";
+    private const string SetTemporaryProfileLabel     = "CustomizePlus.Profile.SetTemporaryProfileOnCharacter";
+    private const string DeleteTemporaryProfileLabel  = "CustomizePlus.Profile.DeleteTemporaryProfileOnCharacter";
+
+    // CustomizePlus.Api.Enums.ErrorCode
+    private const int Success          = 0;
+    private const int InvalidCharacter = 1;
+    private const int ProfileNotFound  = 3;
 
     private readonly IDalamudPluginInterface _pi;
     private readonly ILogger<CustomizePlusIpc> _log;
@@ -24,28 +41,47 @@ public sealed class CustomizePlusIpc
         get { try { return _pi.GetIpcSubscriber<(int, int)>(ApiVersionLabel).InvokeFunc().Item1 > 0; } catch { return false; } }
     }
 
-    // Circuit breaker for GetProfileJson. Customize+'s API signature drifts between versions and
-    // the failed call appears to trigger Penumbra redraws on the caller, which then schedule
-    // another sync push → another failed call → feedback loop. After N consecutive failures we
-    // stop trying for a cool-off period, breaking the loop. We also probe two candidate signatures
-    // to handle both the legacy <int, string?> and newer <int, (int, string?)> tuple-return shapes.
+    // Circuit breaker for GetProfileJson. Kept from the signature-drift era: a call that throws
+    // every collect used to feed a redraw → sync → failed-call loop. After N consecutive real
+    // failures we stop trying for a cool-off period. "No profile on this character" is NOT a
+    // failure and never trips it.
     private int _profileFailCount;
     private DateTime _profileNextRetryAt = DateTime.MinValue;
-    private Func<int, string?>? _profileInvoker;
     private const int ProfileFailureThreshold = 3;
     private static readonly TimeSpan ProfileCoolOff = TimeSpan.FromSeconds(60);
 
+    /// <summary>Returns the JSON of the Customize+ profile active on the given object, or null if
+    /// it has none (or Customize+ is unavailable / cooling off).</summary>
     public string? GetProfileJson(int objectIndex)
     {
         if (DateTime.UtcNow < _profileNextRetryAt) return null;
 
         try
         {
-            _profileInvoker ??= ResolveProfileInvoker();
-            if (_profileInvoker is null) { TripBreaker("no shape bound"); return null; }
-            var result = _profileInvoker(objectIndex);
-            _profileFailCount = 0;  // success — reset
-            return result;
+            var (status, profileId) = _pi.GetIpcSubscriber<ushort, (int, Guid?)>(GetActiveProfileIdLabel)
+                                         .InvokeFunc((ushort)objectIndex);
+            if (status is ProfileNotFound or InvalidCharacter || (status == Success && profileId is null))
+            {
+                _profileFailCount = 0;
+                return null; // no profile, or character not ready yet — both normal
+            }
+            if (status != Success || profileId is null)
+            {
+                TripBreaker($"GetActiveProfileIdOnCharacter returned {status}");
+                return null;
+            }
+
+            var (getStatus, json) = _pi.GetIpcSubscriber<Guid, (int, string)>(GetProfileByUniqueIdLabel)
+                                       .InvokeFunc(profileId.Value);
+            if (getStatus == ProfileNotFound) { _profileFailCount = 0; return null; } // removed between calls
+            if (getStatus != Success)
+            {
+                TripBreaker($"GetByUniqueId returned {getStatus}");
+                return null;
+            }
+
+            _profileFailCount = 0;
+            return string.IsNullOrEmpty(json) ? null : json;
         }
         catch (Exception ex)
         {
@@ -54,62 +90,46 @@ public sealed class CustomizePlusIpc
         }
     }
 
-    private Func<int, string?>? ResolveProfileInvoker()
-    {
-        var attempts = new (string Shape, Func<Func<int, string?>> Build)[]
-        {
-            ("<int, (int, string?)> tuple-return", () =>
-            {
-                var s = _pi.GetIpcSubscriber<int, (int Status, string? Json)>(GetActiveProfileLabel);
-                return idx => s.InvokeFunc(idx).Json;
-            }),
-            ("<int, string?> legacy", () =>
-            {
-                var s = _pi.GetIpcSubscriber<int, string?>(GetActiveProfileLabel);
-                return idx => s.InvokeFunc(idx);
-            }),
-        };
-        foreach (var (shape, build) in attempts)
-        {
-            try
-            {
-                var inv = build();
-                _ = inv(0);  // probe with the local player; if this throws, try next shape
-                _log.LogInformation("Customize+ GetActiveProfile bound with {Shape}", shape);
-                return inv;
-            }
-            catch (Exception ex) { _log.LogDebug("Customize+ shape {Shape} rejected: {Msg}", shape, ex.Message); }
-        }
-        return null;
-    }
-
     private void TripBreaker(string reason)
     {
         _profileFailCount++;
         if (_profileFailCount >= ProfileFailureThreshold)
         {
             _profileNextRetryAt = DateTime.UtcNow + ProfileCoolOff;
-            _log.LogWarning("Customize+ GetActiveProfile failed {N} times ({Reason}); cooling off until {Until:HH:mm:ss}",
+            _log.LogWarning("Customize+ profile read failed {N} times ({Reason}); cooling off until {Until:HH:mm:ss}",
                 _profileFailCount, reason, _profileNextRetryAt);
             _profileFailCount = 0;  // reset counter for next window
         }
         else
         {
-            _log.LogDebug("Customize+ GetActiveProfile failed ({Reason}); attempt {N}/{Threshold}",
+            _log.LogDebug("Customize+ profile read failed ({Reason}); attempt {N}/{Threshold}",
                 reason, _profileFailCount, ProfileFailureThreshold);
         }
     }
 
+    /// <summary>Applies a paired player's profile JSON to their character as a temporary profile.</summary>
     public void ApplyProfile(int objectIndex, string profileJson)
     {
-        try { _pi.GetIpcSubscriber<int, string, object>(SetTemporaryProfileLabel)
-                   .InvokeAction(objectIndex, profileJson); }
-        catch (Exception ex) { _log.LogError(ex, "Customize+ SetTemporaryProfile failed"); }
+        try
+        {
+            var (status, _) = _pi.GetIpcSubscriber<ushort, string, (int, Guid?)>(SetTemporaryProfileLabel)
+                                 .InvokeFunc((ushort)objectIndex, profileJson);
+            if (status != Success)
+                _log.LogWarning("Customize+ SetTemporaryProfileOnCharacter(idx={Idx}) returned {Status}", objectIndex, status);
+        }
+        catch (Exception ex) { _log.LogError(ex, "Customize+ SetTemporaryProfileOnCharacter failed"); }
     }
 
+    /// <summary>Removes any temporary profile we applied to the given character. Safe to call when
+    /// there isn't one.</summary>
     public void RemoveProfile(int objectIndex)
     {
-        try { _pi.GetIpcSubscriber<int, object>(DeleteTemporaryProfileLabel).InvokeAction(objectIndex); }
-        catch (Exception ex) { _log.LogError(ex, "Customize+ DeleteTemporaryProfile failed"); }
+        try
+        {
+            var status = _pi.GetIpcSubscriber<ushort, int>(DeleteTemporaryProfileLabel).InvokeFunc((ushort)objectIndex);
+            if (status is not (Success or ProfileNotFound or InvalidCharacter))
+                _log.LogDebug("Customize+ DeleteTemporaryProfileOnCharacter(idx={Idx}) returned {Status}", objectIndex, status);
+        }
+        catch (Exception ex) { _log.LogError(ex, "Customize+ DeleteTemporaryProfileOnCharacter failed"); }
     }
 }
