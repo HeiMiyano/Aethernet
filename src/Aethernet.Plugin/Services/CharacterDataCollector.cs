@@ -112,22 +112,38 @@ public sealed class CharacterDataCollector
                     catch (Exception ex) { _log.LogDebug(ex, "failed to ingest {Path}", actualPath); }
                 }
                 // Merge mod-walk files (animations/VFX/sounds) for the local player only.
-                int animAdded = 0;
+                // Entries arrive winners-first (see PenumbraIpc.EnumerateActiveModFiles), so the
+                // first one seen for a game path is kept. GetResourcePaths reports unmodded loaded
+                // files as self-referential swaps (path -> same path); those are no-ops and must not
+                // block, or be allowed to overwrite, a real replacement from the mod walk.
+                int animAdded = 0, swapAdded = 0, walkMissing = 0;
                 foreach (var (gamePath, actualPath) in per.ModWalkFiles)
                 {
                     if (dto.FileReplacements.ContainsKey(gamePath)) continue;
-                    if (!File.Exists(actualPath)) continue;
+                    var hasRealSwap = dto.FileSwaps.TryGetValue(gamePath, out var existingSwap)
+                                      && !string.Equals(existingSwap, gamePath, StringComparison.OrdinalIgnoreCase);
+                    if (hasRealSwap) continue;
+
+                    if (!Path.IsPathRooted(actualPath))
+                    {
+                        dto.FileSwaps[gamePath] = actualPath;
+                        swapAdded++;
+                        continue;
+                    }
+                    if (!File.Exists(actualPath)) { walkMissing++; continue; }
                     try
                     {
                         var (hash, cachePath) = _cache.Ingest(actualPath);
                         dto.FileReplacements[gamePath] = hash;
+                        dto.FileSwaps.Remove(gamePath); // drop any self-referential no-op swap
                         hashToPath[hash] = cachePath;
                         animAdded++;
                     }
                     catch (Exception ex) { _log.LogDebug(ex, "failed to ingest mod file {Path}", actualPath); }
                 }
-                if (animAdded > 0)
-                    _log.LogInformation("CollectForObject(idx={Idx}): +{Anim} mod-walk files (animations/VFX)", per.ObjectIndex, animAdded);
+                if (per.ModWalkFiles.Count > 0)
+                    _log.LogInformation("CollectForObject(idx={Idx}): mod-walk +{Anim} files, +{Swaps} swaps, {Missing} missing on disk (animations/VFX/sounds)",
+                        per.ObjectIndex, animAdded, swapAdded, walkMissing);
                 _log.LogInformation("CollectForObject(idx={Idx}): total={Total} swap={Swap} replace={Replace} missing={Missing}",
                     per.ObjectIndex, per.Resources.Count, swap, replace, missing);
                 appearances[per.Kind] = dto;
