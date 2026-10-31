@@ -1,0 +1,931 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aethernet Admin</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f4f2; --surface: #fcfcfb; --surface-2: #efeeea; --text: #0b0b0b; --text-2: #52514e;
+    --muted: #77766f; --border: rgba(11,11,11,.10); --grid: #e4e3de;
+    --series-1: #2a78d6; --series-2: #eb6834;
+    --accent: #2a78d6; --accent-ink: #ffffff; --danger: #d03b3b; --good: #0a7d0a; --warn: #a15c00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #121211; --surface: #1a1a19; --surface-2: #242422; --text: #f0efec; --text-2: #c3c2b7;
+      --muted: #8f8e86; --border: rgba(240,239,236,.10); --grid: #2d2d2a;
+      --series-1: #3987e5; --series-2: #d95926;
+      --accent: #3987e5; --accent-ink: #ffffff; --danger: #e66767; --good: #3fbf3f; --warn: #fab219;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--accent); }
+  button { font: inherit; }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+           padding: .75rem 1.25rem; border-bottom: 1px solid var(--border); background: var(--surface); }
+  header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
+  header .who { font-size: .82rem; color: var(--text-2); }
+  main { max-width: 1180px; margin: 0 auto; padding: 1.25rem 1rem 4rem; }
+
+  nav.tabs { display: flex; gap: .35rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+  nav.tabs button { background: none; border: 1px solid var(--border); color: var(--text-2);
+                    padding: .4rem .95rem; border-radius: 999px; cursor: pointer; }
+  nav.tabs button.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  nav.tabs .badge { display: inline-block; min-width: 1.3em; padding: 0 .35em; margin-left: .35em; border-radius: 999px;
+                    background: var(--danger); color: #fff; font-size: .72rem; font-weight: 700; text-align: center; }
+  section.panel { display: none; }
+  section.panel.active { display: block; }
+
+  .grid { display: grid; gap: .75rem; }
+  .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 1rem; }
+  @media (max-width: 900px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: .8rem 1rem; }
+  .tile .l { font-size: .78rem; color: var(--text-2); }
+  .tile .v { font-size: 1.5rem; font-weight: 600; margin-top: .1rem; }
+  .tile .s { font-size: .76rem; color: var(--muted); }
+  .tile.hero .v { font-size: 3rem; line-height: 1.05; }
+  .tile.hero { background: var(--surface-2); }
+
+  .charts { grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); }
+  @media (max-width: 520px) { .charts { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: .9rem 1rem .7rem; min-width: 0; }
+  .card h3 { margin: 0; font-size: .92rem; font-weight: 600; }
+  .card .sub { font-size: .78rem; color: var(--text-2); margin: .1rem 0 .4rem; }
+  .card .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: .5rem; }
+  .legend { display: flex; gap: .9rem; font-size: .78rem; color: var(--text-2); margin-bottom: .2rem; flex-wrap: wrap; }
+  .legend .key { display: inline-block; width: 14px; height: 2px; border-radius: 1px; vertical-align: middle; margin-right: .35rem; }
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; overflow: visible; }
+  .chart .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .chart .gridline { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
+  .chart .endlabel { fill: var(--text-2); font-size: 11px; }
+  .chart .crosshair { stroke: var(--muted); stroke-width: 1; }
+  .chart .empty { fill: var(--muted); font-size: 12px; }
+  .chart .bar:hover, .chart .bar.hot { opacity: .78; }
+  .tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+         border-radius: 8px; padding: .4rem .6rem; font-size: .78rem; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+         white-space: nowrap; display: none; z-index: 5; }
+  .tip .t { color: var(--text-2); margin-bottom: .15rem; }
+  .tip .row { display: flex; align-items: center; gap: .4rem; }
+  .tip .row b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tip .row span.n { color: var(--text-2); }
+  .tip .key { width: 12px; height: 2px; border-radius: 1px; }
+  .linkbtn { background: none; border: none; color: var(--text-2); font-size: .76rem; cursor: pointer; padding: .1rem .2rem; text-decoration: underline; }
+  .datatable { margin-top: .5rem; max-height: 220px; overflow: auto; }
+  .note { font-size: .78rem; color: var(--muted); margin: .4rem 0 1rem; }
+
+  .toolbar { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-bottom: .9rem; }
+  .toolbar .grow { flex: 1; min-width: 180px; }
+  input[type=text], input[type=password], select {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: .45rem .65rem; border-radius: 7px; font: inherit; }
+  input[type=text], input[type=password] { width: 100%; }
+  .btn { background: var(--accent); color: var(--accent-ink); border: none; padding: .45rem .95rem;
+         border-radius: 7px; cursor: pointer; font-weight: 500; }
+  .btn.ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn.danger { background: var(--danger); color: #fff; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .seg button { background: var(--surface); color: var(--text-2); border: none; padding: .35rem .7rem; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.on { background: var(--surface-2); color: var(--text); font-weight: 600; }
+
+  .tablewrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--text-2); font-weight: 600; font-size: .76rem; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.click { cursor: pointer; }
+  tbody tr.click:hover td { background: var(--surface-2); }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .82rem; }
+  .dim { color: var(--muted); }
+  .pill { display: inline-block; padding: .05rem .5rem; border-radius: 999px; font-size: .72rem; font-weight: 600;
+          border: 1px solid currentColor; white-space: nowrap; }
+  .pill.good { color: var(--good); } .pill.bad { color: var(--danger); } .pill.warn { color: var(--warn); }
+  .pill.role { color: var(--accent); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-right: .35rem; }
+  .pager { display: flex; gap: .5rem; align-items: center; justify-content: flex-end; margin-top: .6rem; font-size: .82rem; color: var(--text-2); }
+  .empty-row { color: var(--muted); padding: 1rem .7rem; }
+
+  dialog { border: 1px solid var(--border); border-radius: 12px; padding: 0; background: var(--surface); color: var(--text);
+           width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  .dlg-head { display: flex; justify-content: space-between; align-items: center; padding: .85rem 1.1rem; border-bottom: 1px solid var(--border); }
+  .dlg-head h2 { font-size: 1rem; margin: 0; }
+  .dlg-body { padding: .9rem 1.1rem 1.1rem; overflow: auto; }
+  .fields { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1rem; font-size: .88rem; margin-bottom: .9rem; }
+  .fields .k { color: var(--text-2); }
+  .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .9rem; }
+  .msg { font-size: .82rem; margin-top: .5rem; min-height: 1.2em; color: var(--text-2); }
+  .msg.error { color: var(--danger); }
+
+  #login { max-width: 400px; margin: 9vh auto; padding: 0 16px; }
+  #login .card { padding: 1.4rem 1.4rem 1.2rem; }
+  #login h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
+  #login p { color: var(--text-2); font-size: .85rem; margin: 0 0 1rem; }
+  #login label { display: block; font-size: .8rem; color: var(--text-2); margin: .6rem 0 .25rem; }
+  #login details { font-size: .8rem; color: var(--text-2); margin-top: 1rem; }
+  #login code { font-size: .78rem; background: var(--surface-2); padding: .05rem .3rem; border-radius: 4px; overflow-wrap: anywhere; }
+  #app { display: none; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="card">
+    <h1>Aethernet admin</h1>
+    <p>Sign in with an admin or moderator account.</p>
+    <label for="loginUid">UID</label>
+    <input type="text" id="loginUid" autocomplete="username" spellcheck="false">
+    <label for="loginKey">Secret key</label>
+    <input type="password" id="loginKey" autocomplete="current-password">
+    <div style="margin-top:1rem"><button class="btn" id="loginBtn" style="width:100%">Sign in</button></div>
+    <div class="msg" id="loginMsg"></div>
+    <details>
+      <summary>Where do I find these?</summary>
+      <p style="margin:.5rem 0 0">Your <b>UID</b> is shown in the plugin's main window (<code>/aethernet</code>).
+      Your <b>secret key</b> is the <code>SecretKey</code> value in
+      <code>%APPDATA%\XIVLauncher\pluginConfigs\Aethernet.json</code> on the PC you play on.
+      The account must be linked to Discord and have the admin or moderator role.</p>
+    </details>
+  </div>
+</div>
+
+<div id="app">
+  <header>
+    <h1>Aethernet admin</h1>
+    <div style="display:flex;align-items:center;gap:.8rem">
+      <span class="who" id="whoami"></span>
+      <button class="btn ghost" id="logoutBtn">Sign out</button>
+    </div>
+  </header>
+  <main>
+    <nav class="tabs" id="tabs">
+      <button data-tab="overview" class="active">Overview</button>
+      <button data-tab="users">Users</button>
+      <button data-tab="online">Online</button>
+      <button data-tab="groups">Syncshells</button>
+      <button data-tab="reports">Reports <span class="badge" id="reportsBadge" hidden></span></button>
+      <button data-tab="audit">Audit log</button>
+    </nav>
+
+    <!-- OVERVIEW -->
+    <section class="panel active" id="panel-overview">
+      <div class="grid tiles" id="tiles"></div>
+      <div class="toolbar">
+        <span class="dim" style="font-size:.82rem">Live traffic resolution</span>
+        <div class="seg" id="resSeg">
+          <button data-min="5">5 min</button><button data-min="15" class="on">15 min</button><button data-min="60">1 hour</button>
+        </div>
+        <span class="grow"></span>
+        <span class="dim" style="font-size:.78rem" id="updatedAt"></span>
+      </div>
+      <div class="grid charts">
+        <div class="card" id="c-online"></div>
+        <div class="card" id="c-transfer"></div>
+        <div class="card" id="c-push"></div>
+        <div class="card" id="c-signups"></div>
+      </div>
+      <div class="note" id="samplingNote"></div>
+    </section>
+
+    <!-- USERS -->
+    <section class="panel" id="panel-users">
+      <div class="toolbar">
+        <div class="grow"><input type="text" id="userQ" placeholder="Search UID, alias, Discord name (@handle) or Discord ID" spellcheck="false"></div>
+        <select id="userFilter" aria-label="Filter">
+          <option value="all">All users</option>
+          <option value="online">Online now</option>
+          <option value="banned">Banned</option>
+          <option value="staff">Admins &amp; moderators</option>
+          <option value="unlinked">Not linked to Discord</option>
+          <option value="linked">Linked to Discord</option>
+        </select>
+        <select id="userSort" aria-label="Sort">
+          <option value="lastSeen">Last seen</option>
+          <option value="created">Newest</option>
+          <option value="alias">Alias</option>
+          <option value="discord">Discord name</option>
+          <option value="uid">UID</option>
+        </select>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>User</th><th>Discord</th><th>Status</th><th>Last connected</th><th>Created</th></tr></thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+      </div>
+      <div class="pager"><span id="usersCount"></span>
+        <button class="btn ghost" id="usersPrev">Previous</button><button class="btn ghost" id="usersNext">Next</button></div>
+    </section>
+
+    <!-- ONLINE -->
+    <section class="panel" id="panel-online">
+      <div class="toolbar"><span class="dim" id="onlineCount"></span><span class="grow"></span>
+        <button class="btn ghost" id="onlineRefresh">Refresh</button></div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>User</th><th>Character</th><th>Discord</th><th>Connected since</th></tr></thead>
+          <tbody id="onlineBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- GROUPS -->
+    <section class="panel" id="panel-groups">
+      <div class="toolbar"><div class="grow"><input type="text" id="groupQ" placeholder="Search GID, alias, owner UID or owner Discord name" spellcheck="false"></div>
+        <button class="btn ghost" id="groupRefresh">Refresh</button></div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Syncshell</th><th>Owner</th><th class="num">Members</th><th>Created</th></tr></thead>
+          <tbody id="groupsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- REPORTS -->
+    <section class="panel" id="panel-reports">
+      <div class="toolbar">
+        <div class="seg" id="reportsSeg"><button data-res="false" class="on">Open</button><button data-res="true">Resolved</button></div>
+        <span class="grow"></span><button class="btn ghost" id="reportsRefresh">Refresh</button>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Reported</th><th>Reporter</th><th>Reason</th><th>When</th><th></th></tr></thead>
+          <tbody id="reportsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- AUDIT -->
+    <section class="panel" id="panel-audit">
+      <div class="toolbar"><span class="grow"></span><button class="btn ghost" id="auditRefresh">Refresh</button></div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>When</th><th>By</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
+          <tbody id="auditBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="dlg">
+  <div class="dlg-head"><h2 id="dlgTitle"></h2><button class="btn ghost" id="dlgClose">Close</button></div>
+  <div class="dlg-body" id="dlgBody"></div>
+</dialog>
+
+<script>
+(function () {
+  "use strict";
+  const AUTH_BASE_URL = "__AUTH_BASE_URL__";
+  const TOKEN_KEY = "aethernet_admin_jwt";
+  const $  = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const SVG = "http://www.w3.org/2000/svg";
+
+  // ---------- storage / session ----------
+  function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; } }
+  function setToken(t) { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch {} }
+  function decodeJwt(t) {
+    try {
+      const p = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+      return JSON.parse(decodeURIComponent(escape(atob(p + "===".slice((p.length + 3) % 4)))));
+    } catch { return null; }
+  }
+  let me = { uid: "", roles: [], isAdmin: false, exp: 0 };
+  function loadMe() {
+    const c = decodeJwt(getToken()) || {};
+    const rk = Object.keys(c).find(k => k === "role" || k.endsWith("/claims/role"));
+    const uk = Object.keys(c).find(k => k.endsWith("/nameidentifier")) || "sub";
+    const roles = rk ? [].concat(c[rk]) : [];
+    me = { uid: c[uk] || c.sub || "", roles, isAdmin: roles.includes("admin"), exp: (c.exp || 0) * 1000 };
+  }
+
+  // ---------- formatting ----------
+  const nf = new Intl.NumberFormat();
+  function compact(n) {
+    if (n == null || isNaN(n)) return "—";
+    const a = Math.abs(n);
+    if (a < 10000) return nf.format(Math.round(n * 10) / 10);
+    if (a < 1e6) return (n / 1e3).toFixed(a < 1e5 ? 1 : 0).replace(/\.0$/, "") + "K";
+    if (a < 1e9) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    return (n / 1e9).toFixed(1).replace(/\.0$/, "") + "B";
+  }
+  function bytes(n) {
+    if (n == null || isNaN(n)) return "—";
+    const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + " " + u[i];
+  }
+  function dt(s) { if (!s) return "—"; const d = new Date(s); return isNaN(d) ? s : d.toLocaleString(); }
+  function ago(s) {
+    if (!s) return "—";
+    const sec = (Date.now() - new Date(s).getTime()) / 1000;
+    if (sec < 60) return "just now";
+    if (sec < 3600) return Math.floor(sec / 60) + " min ago";
+    if (sec < 86400) return Math.floor(sec / 3600) + " h ago";
+    if (sec < 86400 * 30) return Math.floor(sec / 86400) + " d ago";
+    return new Date(s).toLocaleDateString();
+  }
+  const hhmm = d => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const dayLabel = s => new Date(s + "T00:00:00Z").toLocaleDateString([], { month: "short", day: "numeric", timeZone: "UTC" });
+
+  // tiny DOM helper — text always goes through textContent
+  function h(tag, props, ...kids) {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(props || {})) {
+      if (v == null || v === false) continue;
+      if (k === "class") e.className = v;
+      else if (k === "text") e.textContent = v;
+      else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+      else e.setAttribute(k, v === true ? "" : v);
+    }
+    for (const kid of kids.flat()) if (kid != null && kid !== false) e.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+    return e;
+  }
+  function s(tag, attrs, parent) {
+    const e = document.createElementNS(SVG, tag);
+    for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function pill(text, kind) { return h("span", { class: "pill " + kind, text }); }
+  // Main label: alias, else the Discord handle, else "(no alias)". Discord handle is shown under it
+  // when there's an alias too, so moderators can always tell who the person is on Discord.
+  function userCell(uid, alias, discordUsername) {
+    const handle = discordUsername ? "@" + discordUsername : null;
+    const label = alias || handle;
+    return h("div", {},
+      h("div", { text: label || "(no alias)", class: label ? "" : "dim" }),
+      alias && handle ? h("div", { class: "dim", text: handle }) : null,
+      h("div", { class: "mono dim", text: uid }));
+  }
+  // Discord column/field: @handle + display name + snowflake. "name pending" when linked before
+  // names were recorded and the bot hasn't filled it in yet.
+  function discordCell(u, withMeta) {
+    if (!u.discordUserId && !u.discordLinked) return pill("not linked", "warn");
+    return h("div", {},
+      u.discordUsername ? h("div", { text: "@" + u.discordUsername }) : h("div", { class: "dim", text: "name pending" }),
+      u.discordDisplayName ? h("div", { class: "dim", text: u.discordDisplayName }) : null,
+      u.discordUserId ? h("div", { class: "mono dim", text: u.discordUserId }) : null,
+      withMeta && u.discordProfileUpdatedAt ? h("div", { class: "dim", text: "name checked " + ago(u.discordProfileUpdatedAt) }) : null);
+  }
+
+  // ---------- API ----------
+  class ApiError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
+  async function api(path, opts) {
+    opts = opts || {};
+    const headers = Object.assign({ Authorization: "Bearer " + getToken() }, opts.headers || {});
+    if (opts.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+    const res = await fetch(path, Object.assign({}, opts, { headers }));
+    const method = (opts.method || "GET").toUpperCase();
+    if (res.status === 401 || (res.status === 403 && method === "GET")) {
+      setToken(""); showLogin(res.status === 401 ? "Your session expired — sign in again." : "This account doesn't have moderator access.");
+      throw new ApiError(res.status, "unauthorized");
+    }
+    if (res.status === 403) throw new ApiError(403, "Only admins can do that.");
+    if (res.status === 404) throw new ApiError(404, "Not found.");
+    if (!res.ok) throw new ApiError(res.status, "Request failed (" + res.status + ").");
+    if (res.status === 204) return null;
+    return (res.headers.get("content-type") || "").includes("json") ? res.json() : null;
+  }
+
+  // ---------- login ----------
+  function showLogin(msg) {
+    $("#app").style.display = "none"; $("#login").style.display = "block";
+    const m = $("#loginMsg"); m.textContent = msg || ""; m.className = "msg" + (msg ? " error" : "");
+    stopRefresh();
+  }
+  function showApp() {
+    loadMe();
+    if (me.exp && me.exp < Date.now()) { setToken(""); showLogin("Your session expired — sign in again."); return; }
+    $("#login").style.display = "none"; $("#app").style.display = "block";
+    $("#whoami").textContent = (me.uid || "signed in") + (me.roles.length ? " · " + me.roles.join(", ") : "");
+    switchTab(currentTab);
+    refreshReportsBadge();
+  }
+  async function doLogin() {
+    const uid = $("#loginUid").value.trim(), key = $("#loginKey").value.trim(), m = $("#loginMsg");
+    if (!uid || !key) { m.className = "msg error"; m.textContent = "Enter your UID and secret key."; return; }
+    m.className = "msg"; m.textContent = "Signing in…";
+    try {
+      const res = await fetch((AUTH_BASE_URL || "") + "/auth/login", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ uid, secretKey: key }),
+      });
+      if (!res.ok) {
+        let text = "Wrong UID or secret key.";
+        try { const j = await res.json(); if (j && j.message) text = j.message; } catch {}
+        m.className = "msg error"; m.textContent = text; return;
+      }
+      const data = await res.json();
+      const claims = decodeJwt(data.accessToken) || {};
+      const rk = Object.keys(claims).find(k => k === "role" || k.endsWith("/claims/role"));
+      const roles = rk ? [].concat(claims[rk]) : [];
+      if (!roles.includes("admin") && !roles.includes("moderator")) {
+        m.className = "msg error"; m.textContent = "Signed in, but this account isn't an admin or moderator."; return;
+      }
+      setToken(data.accessToken); $("#loginKey").value = ""; m.textContent = ""; showApp();
+    } catch {
+      m.className = "msg error";
+      m.textContent = "Couldn't reach the auth service" + (AUTH_BASE_URL ? "." : " (Admin:AuthBaseUrl isn't configured on the hub).");
+    }
+  }
+  $("#loginBtn").addEventListener("click", doLogin);
+  $("#loginKey").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  $("#logoutBtn").addEventListener("click", () => { setToken(""); showLogin(); });
+
+  // ---------- tabs ----------
+  let currentTab = "overview";
+  function switchTab(tab) {
+    currentTab = tab;
+    $$("#tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+    $$("section.panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + tab));
+    stopRefresh();
+    ({ overview: () => { loadOverview(); startRefresh(); }, users: loadUsers, online: loadOnline,
+       groups: loadGroups, reports: loadReports, audit: loadAudit })[tab]();
+  }
+  $$("#tabs button").forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+
+  let refreshTimer = null;
+  function startRefresh() { refreshTimer = setInterval(() => { if (!document.hidden) loadOverview(); }, 60000); }
+  function stopRefresh() { if (refreshTimer) clearInterval(refreshTimer); refreshTimer = null; }
+
+  // =====================================================================
+  // Charts (inline SVG). Thin marks, hairline grid, crosshair/hover tooltips,
+  // a table view for every chart.
+  // =====================================================================
+  function niceScale(max, count) {
+    if (!(max > 0)) max = 1;
+    const raw = max / (count || 4), mag = Math.pow(10, Math.floor(Math.log10(raw))), n = raw / mag;
+    const step = (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * mag;
+    const top = Math.ceil(max / step) * step, ticks = [];
+    for (let v = 0; v <= top + step / 1e6; v += step) ticks.push(+v.toFixed(10));
+    return { top, ticks };
+  }
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  // card = { el, title, sub, legend: [{name, color}] , table: {cols, rows} }
+  function chartCard(el, title, sub, legend, table) {
+    el.replaceChildren();
+    const tableBox = h("div", { class: "datatable", hidden: true });
+    const toggle = h("button", { class: "linkbtn", text: "Table", onclick: () => {
+      tableBox.hidden = !tableBox.hidden; toggle.textContent = tableBox.hidden ? "Table" : "Hide table";
+    }});
+    el.append(h("div", { class: "card-head" }, h("div", {}, h("h3", { text: title }), h("div", { class: "sub", text: sub })), toggle));
+    if (legend && legend.length > 1)
+      el.append(h("div", { class: "legend" }, legend.map(l => h("span", {}, h("span", { class: "key", style: "background:" + l.color }), l.name))));
+    const chart = h("div", { class: "chart" });
+    el.append(chart, tableBox);
+    if (table) {
+      const t = h("table", {}, h("thead", {}, h("tr", {}, table.cols.map((c, i) => h("th", { class: i ? "num" : "", text: c })))),
+        h("tbody", {}, table.rows.map(r => h("tr", {}, r.map((c, i) => h("td", { class: i ? "num" : "", text: c }))))));
+      tableBox.append(t);
+    }
+    return chart;
+  }
+
+  function showTip(chart, tip, x, y, title, rows) {
+    tip.replaceChildren(h("div", { class: "t", text: title }),
+      ...rows.map(r => h("div", { class: "row" }, h("span", { class: "key", style: "background:" + r.color }), h("b", { text: r.value }), h("span", { class: "n", text: r.name }))));
+    tip.style.display = "block";
+    const cw = chart.clientWidth, tw = tip.offsetWidth;
+    tip.style.left = Math.min(Math.max(0, x + 12), cw - tw) + "px";
+    tip.style.top = Math.max(0, y - 10) + "px";
+  }
+
+  // Line chart: shared x (times), one axis, null = gap.
+  function lineChart(chart, { times, series, fmtY, fmtX, height }) {
+    const H = height || 190, W = Math.max(280, chart.clientWidth || 440);
+    const multi = series.length > 1;
+    const m = { l: 44, r: multi ? 78 : 14, t: 10, b: 24 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b, n = times.length;
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img" });
+    chart.replaceChildren(svg);
+    const tip = h("div", { class: "tip" }); chart.append(tip);
+
+    const all = series.flatMap(x => x.values).filter(v => v != null);
+    if (n < 2 || all.length === 0) {
+      s("text", { x: W / 2, y: H / 2, "text-anchor": "middle", class: "empty" }, svg).textContent =
+        n < 2 ? "Collecting data — check back in a few minutes." : "No data yet.";
+      return;
+    }
+    const { top, ticks } = niceScale(Math.max(...all));
+    const X = i => m.l + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
+    const Y = v => m.t + ih - (v / top) * ih;
+
+    for (const t of ticks) {
+      s("line", { x1: m.l, x2: m.l + iw, y1: Y(t), y2: Y(t), class: "gridline" }, svg);
+      s("text", { x: m.l - 8, y: Y(t) + 4, "text-anchor": "end", class: "axis" }, svg).textContent = fmtY(t, true);
+    }
+    const xTicks = Math.max(2, Math.min(6, n, Math.floor(iw / 80)));
+    for (let k = 0; k < xTicks; k++) {
+      const i = Math.round((k / (xTicks - 1 || 1)) * (n - 1));
+      s("text", { x: X(i), y: H - 6, "text-anchor": k === 0 ? "start" : k === xTicks - 1 ? "end" : "middle", class: "axis" }, svg).textContent = fmtX(times[i]);
+    }
+
+    const surface = cssVar("--surface");
+    for (const ser of series) {
+      let d = "", pen = false;
+      ser.values.forEach((v, i) => {
+        if (v == null) { pen = false; return; }
+        d += (pen ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1) + " "; pen = true;
+      });
+      s("path", { d, fill: "none", stroke: ser.color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+      let last = -1; for (let i = n - 1; i >= 0; i--) if (ser.values[i] != null) { last = i; break; }
+      if (last >= 0) {
+        s("circle", { cx: X(last), cy: Y(ser.values[last]), r: 4, fill: ser.color, stroke: surface, "stroke-width": 2 }, svg);
+        if (multi) s("text", { x: X(last) + 8, y: Y(ser.values[last]) + 4, class: "endlabel" }, svg).textContent = ser.name;
+      }
+    }
+
+    // hover layer: crosshair snaps to the nearest x; one tooltip lists every series
+    const cross = s("line", { y1: m.t, y2: m.t + ih, class: "crosshair", visibility: "hidden" }, svg);
+    const dots = series.map(ser => s("circle", { r: 4, fill: ser.color, stroke: surface, "stroke-width": 2, visibility: "hidden" }, svg));
+    const hit = s("rect", { x: m.l, y: m.t, width: iw, height: ih, fill: "transparent", tabindex: 0,
+                            "aria-label": "Chart — use left and right arrow keys to read values" }, svg);
+    let cur = n - 1;
+    function at(i, px) {
+      cur = Math.max(0, Math.min(n - 1, i));
+      const x = X(cur);
+      cross.setAttribute("x1", x); cross.setAttribute("x2", x); cross.setAttribute("visibility", "visible");
+      series.forEach((ser, k) => {
+        const v = ser.values[cur];
+        if (v == null) { dots[k].setAttribute("visibility", "hidden"); return; }
+        dots[k].setAttribute("cx", x); dots[k].setAttribute("cy", Y(v)); dots[k].setAttribute("visibility", "visible");
+      });
+      const scale = chart.clientWidth / W;
+      showTip(chart, tip, (px ?? x) * scale, m.t * scale, fmtX(times[cur], true),
+        series.map(ser => ({ color: ser.color, name: ser.name, value: ser.values[cur] == null ? "—" : fmtY(ser.values[cur]) })));
+    }
+    function hide() { cross.setAttribute("visibility", "hidden"); dots.forEach(d => d.setAttribute("visibility", "hidden")); tip.style.display = "none"; }
+    hit.addEventListener("pointermove", e => {
+      const r = svg.getBoundingClientRect(), px = (e.clientX - r.left) * (W / r.width);
+      at(Math.round(((px - m.l) / iw) * (n - 1)), px);
+    });
+    hit.addEventListener("pointerleave", hide);
+    hit.addEventListener("blur", hide);
+    hit.addEventListener("focus", () => at(cur));
+    hit.addEventListener("keydown", e => {
+      if (e.key === "ArrowLeft") { at(cur - 1); e.preventDefault(); }
+      if (e.key === "ArrowRight") { at(cur + 1); e.preventDefault(); }
+    });
+  }
+
+  // Column chart: one series, bars ≤24px, rounded data-end, square at the baseline.
+  function columnChart(chart, { labels, values, color, fmtY, fmtX, tipName, height }) {
+    const H = height || 190, W = Math.max(280, chart.clientWidth || 440);
+    const m = { l: 36, r: 8, t: 16, b: 24 }, iw = W - m.l - m.r, ih = H - m.t - m.b, n = values.length;
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img" });
+    chart.replaceChildren(svg);
+    const tip = h("div", { class: "tip" }); chart.append(tip);
+    const max = Math.max(0, ...values);
+    const { top, ticks } = niceScale(max || 1);
+    const Y = v => m.t + ih - (v / top) * ih, base = m.t + ih;
+    const band = iw / n, bw = Math.max(2, Math.min(24, band - 2));
+
+    for (const t of ticks) {
+      s("line", { x1: m.l, x2: m.l + iw, y1: Y(t), y2: Y(t), class: "gridline" }, svg);
+      s("text", { x: m.l - 8, y: Y(t) + 4, "text-anchor": "end", class: "axis" }, svg).textContent = fmtY(t);
+    }
+    const every = Math.ceil(n / 6);
+    labels.forEach((l, i) => {
+      if (i % every !== 0 && i !== n - 1) return;
+      if (i !== n - 1 && n - 1 - i < every / 2) return;   // keep the last label from colliding
+      s("text", { x: m.l + band * i + band / 2, y: H - 6, "text-anchor": "middle", class: "axis" }, svg).textContent = fmtX(l);
+    });
+    const maxIdx = values.indexOf(max);
+    values.forEach((v, i) => {
+      const x = m.l + band * i + (band - bw) / 2;
+      let bar = null;
+      if (v > 0) {
+        const y = Y(v), r = Math.min(4, base - y, bw / 2);
+        bar = s("path", { class: "bar", fill: color,
+          d: `M${x},${base} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${base} Z` }, svg);
+        if (i === maxIdx) s("text", { x: x + bw / 2, y: y - 5, "text-anchor": "middle", class: "endlabel" }, svg).textContent = fmtY(v);
+      }
+      const hit = s("rect", { x: m.l + band * i, y: m.t, width: band, height: ih, fill: "transparent", tabindex: 0,
+                              "aria-label": fmtX(labels[i], true) + ": " + fmtY(v) }, svg);
+      const on = () => {
+        if (bar) bar.classList.add("hot");
+        const scale = chart.clientWidth / W;
+        showTip(chart, tip, (m.l + band * i + band / 2) * scale, Y(v) * scale - 30, fmtX(labels[i], true),
+          [{ color, name: tipName, value: fmtY(v) }]);
+      };
+      const off = () => { if (bar) bar.classList.remove("hot"); tip.style.display = "none"; };
+      hit.addEventListener("pointerenter", on); hit.addEventListener("focus", on);
+      hit.addEventListener("pointerleave", off); hit.addEventListener("blur", off);
+    });
+  }
+
+  // =====================================================================
+  // Overview
+  // =====================================================================
+  let bucketMinutes = 15, lastOverview = null;
+  $$("#resSeg button").forEach(b => b.addEventListener("click", () => {
+    bucketMinutes = +b.dataset.min;
+    $$("#resSeg button").forEach(x => x.classList.toggle("on", x === b));
+    loadOverview();
+  }));
+
+  async function loadOverview() {
+    $("#panel-overview").style.opacity = lastOverview ? ".6" : "1";
+    if (!lastOverview) $("#tiles").replaceChildren(h("div", { class: "dim", text: "Loading…" }));
+    try { lastOverview = await api("/admin/overview?bucketMinutes=" + bucketMinutes); renderOverview(lastOverview); }
+    catch (e) { if (e.status !== 401 && e.status !== 403) $("#updatedAt").textContent = "Couldn't load: " + e.message; }
+    finally { $("#panel-overview").style.opacity = "1"; }
+  }
+
+  function tile(label, value, sub, hero) {
+    return h("div", { class: "tile" + (hero ? " hero" : "") }, h("div", { class: "l", text: label }), h("div", { class: "v", text: value }), sub ? h("div", { class: "s", text: sub }) : null);
+  }
+
+  function renderOverview(o) {
+    const tr = o.traffic, b = tr.buckets || [];
+    const sum = k => b.reduce((a, x) => a + (x[k] || 0), 0);
+    const pct = o.users ? Math.round((o.discordLinked / o.users) * 100) : 0;
+    $("#tiles").replaceChildren(
+      tile("Online now", compact(o.onlineNow), "connected to the hub", true),
+      tile("Accounts", compact(o.users), o.staff + " staff · " + o.banned + " banned"),
+      tile("Linked to Discord", compact(o.discordLinked), pct + "% of accounts"),
+      tile("Connected today", compact(o.active1d), compact(o.active7d) + " this week · " + compact(o.active30d) + " this month"),
+      tile("Syncshells", compact(o.groups), compact(o.pairs) + " pairs"),
+      tile("Files stored", compact(o.files), bytes(o.fileBytes)),
+      tile("Logins (24h)", compact(sum("loginsOk")), compact(sum("loginsFailed")) + " refused or failed"),
+      tile("Open reports", compact(o.openReports), o.openReports ? "needs review" : "all clear"),
+    );
+    $("#updatedAt").textContent = "Updated " + new Date(o.generatedAt).toLocaleTimeString();
+
+    const times = b.map(x => x.at);
+    const res = bucketMinutes === 60 ? "per hour" : "per " + bucketMinutes + " min";
+    const c1 = cssVar("--series-1"), c2 = cssVar("--series-2");
+    const fx = (t, long) => long ? new Date(t).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) : hhmm(new Date(t));
+
+    // 1. online
+    const onl = b.map(x => x.online);
+    lineChart(chartCard($("#c-online"), "Online users", "Peak " + res + ", last 24 hours", null,
+      { cols: ["Time", "Online"], rows: b.map(x => [fx(x.at, true), x.online ?? "—"]) }),
+      { times, series: [{ name: "Online", color: c1, values: onl }], fmtY: v => compact(v), fmtX: fx });
+
+    // 2. transfer — pick one unit for the whole chart
+    const mx = Math.max(0, ...b.map(x => Math.max(x.uploadBytes || 0, x.downloadBytes || 0)));
+    const [unit, div] = mx >= 1 << 30 ? ["GB", 1 << 30] : mx >= 1 << 20 ? ["MB", 1 << 20] : ["KB", 1 << 10];
+    const conv = v => v == null ? null : v / div;
+    const fu = v => (v < 10 ? (Math.round(v * 10) / 10) : Math.round(v)) + " " + unit;
+    lineChart(chartCard($("#c-transfer"), "Mod file transfer", unit + " " + res + ", last 24 hours",
+      [{ name: "Downloads", color: c1 }, { name: "Uploads", color: c2 }],
+      { cols: ["Time", "Downloads", "Uploads"], rows: b.map(x => [fx(x.at, true), bytes(x.downloadBytes), bytes(x.uploadBytes)]) }),
+      { times, series: [{ name: "Downloads", color: c1, values: b.map(x => conv(x.downloadBytes)) },
+                        { name: "Uploads",   color: c2, values: b.map(x => conv(x.uploadBytes)) }],
+        fmtY: fu, fmtX: fx });
+
+    // 3. pushes
+    lineChart(chartCard($("#c-push"), "Character data deliveries", "Appearance updates sent to paired players, " + res, null,
+      { cols: ["Time", "Deliveries"], rows: b.map(x => [fx(x.at, true), x.pushRecipients == null ? "—" : compact(x.pushRecipients)]) }),
+      { times, series: [{ name: "Deliveries", color: c1, values: b.map(x => x.pushRecipients) }], fmtY: v => compact(v), fmtX: fx });
+
+    // 4. signups (from the database — survives restarts)
+    const sd = o.signupsPerDay;
+    columnChart(chartCard($("#c-signups"), "New accounts", "Per day (UTC), last 30 days", null,
+      { cols: ["Day", "New accounts"], rows: sd.map(x => [x.day, x.count]) }),
+      { labels: sd.map(x => x.day), values: sd.map(x => x.count), color: c1, tipName: "new accounts",
+        fmtY: v => compact(v), fmtX: (d, long) => long ? new Date(d + "T00:00:00Z").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }) : dayLabel(d) });
+
+    const srcBad = Object.entries(tr.sources || {}).filter(([, v]) => v !== "ok");
+    $("#samplingNote").textContent =
+      "Live traffic is sampled every minute and kept in memory since " + dt(tr.samplingSince) +
+      " — it starts over when the hub restarts. New accounts and the counts above come from the database." +
+      (srcBad.length ? " Couldn't read metrics from: " + srcBad.map(([k, v]) => k + " (" + v + ")").join(", ") + "." : "");
+  }
+  let resizeT = null;
+  window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (lastOverview && currentTab === "overview") renderOverview(lastOverview); }, 150); });
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (lastOverview) renderOverview(lastOverview); });
+
+  // =====================================================================
+  // Users
+  // =====================================================================
+  const uState = { q: "", filter: "all", sort: "lastSeen", page: 1, pageSize: 50, total: 0 };
+  async function loadUsers() {
+    const qs = new URLSearchParams({ q: uState.q, filter: uState.filter, sort: uState.sort, page: uState.page, pageSize: uState.pageSize });
+    const body = $("#usersBody");
+    try {
+      const r = await api("/admin/users?" + qs);
+      uState.total = r.total;
+      body.replaceChildren(...(r.rows.length ? r.rows.map(u => h("tr", { class: "click", onclick: () => openUser(u.uid) },
+        h("td", {}, userCell(u.uid, u.alias)),
+        h("td", {}, discordCell(u)),
+        h("td", {}, statusBits(u)),
+        h("td", { title: dt(u.lastSeenAt) }, u.online ? h("span", {}, h("span", { class: "dot" }), "online") : ago(u.lastSeenAt)),
+        h("td", { title: dt(u.createdAt) }, new Date(u.createdAt).toLocaleDateString())))
+        : [h("tr", {}, h("td", { colspan: 5, class: "empty-row", text: "No users match." }))]));
+      const from = r.total ? (r.page - 1) * r.pageSize + 1 : 0, to = Math.min(r.total, r.page * r.pageSize);
+      $("#usersCount").textContent = from + "–" + to + " of " + nf.format(r.total);
+      $("#usersPrev").disabled = r.page <= 1; $("#usersNext").disabled = to >= r.total;
+    } catch (e) { if (e.status !== 401 && e.status !== 403) body.replaceChildren(h("tr", {}, h("td", { colspan: 5, class: "empty-row", text: e.message }))); }
+  }
+  function statusBits(u) {
+    return h("span", { style: "display:inline-flex;gap:.3rem;flex-wrap:wrap" },
+      u.isBanned ? pill("banned", "bad") : pill("active", "good"),
+      u.isAdmin ? pill("admin", "role") : null, u.isModerator ? pill("moderator", "role") : null);
+  }
+  let qT = null;
+  $("#userQ").addEventListener("input", e => { clearTimeout(qT); qT = setTimeout(() => { uState.q = e.target.value.trim(); uState.page = 1; loadUsers(); }, 250); });
+  $("#userFilter").addEventListener("change", e => { uState.filter = e.target.value; uState.page = 1; loadUsers(); });
+  $("#userSort").addEventListener("change", e => { uState.sort = e.target.value; uState.page = 1; loadUsers(); });
+  $("#usersPrev").addEventListener("click", () => { uState.page--; loadUsers(); });
+  $("#usersNext").addEventListener("click", () => { uState.page++; loadUsers(); });
+
+  // ---------- dialog ----------
+  const dlg = $("#dlg");
+  $("#dlgClose").addEventListener("click", () => dlg.close());
+  dlg.addEventListener("click", e => { if (e.target === dlg) dlg.close(); });
+  function openDialog(title, ...content) {
+    $("#dlgTitle").textContent = title; $("#dlgBody").replaceChildren(...content);
+    if (!dlg.open) dlg.showModal();
+  }
+  function fields(pairs) { return h("div", { class: "fields" }, pairs.filter(Boolean).flatMap(([k, v]) => [h("div", { class: "k", text: k }), h("div", {}, v)])); }
+  function refreshCurrentList() { if (currentTab === "users") loadUsers(); else if (currentTab === "online") loadOnline(); else if (currentTab === "groups") loadGroups(); else if (currentTab === "overview") loadOverview(); }
+
+  async function openUser(uid) {
+    openDialog("User", h("div", { class: "dim", text: "Loading…" }));
+    let u;
+    try { u = await api("/admin/users/" + encodeURIComponent(uid)); }
+    catch (e) { openDialog("User", h("div", { class: "msg error", text: e.message })); return; }
+
+    const msg = h("div", { class: "msg" });
+    const act = async (fn, confirmText) => {
+      if (confirmText && !confirm(confirmText)) return;
+      msg.className = "msg"; msg.textContent = "Working…";
+      try { await fn(); await openUser(uid); refreshCurrentList(); }
+      catch (e) { msg.className = "msg error"; msg.textContent = e.message; }
+    };
+    const self = u.uid === me.uid;
+    const buttons = [];
+    if (u.isBanned) buttons.push(h("button", { class: "btn", text: "Unban", onclick: () => act(() => api("/admin/users/" + encodeURIComponent(u.uid) + "/unban", { method: "POST" })) }));
+    else if (!self) buttons.push(h("button", { class: "btn danger", text: "Ban…", onclick: () => {
+      const reason = prompt("Ban reason (the user sees this):", "");
+      if (reason === null) return;
+      act(() => api("/admin/users/" + encodeURIComponent(u.uid) + "/ban", { method: "POST", body: JSON.stringify({ reason: reason || null }) }));
+    }}));
+    if (me.isAdmin && u.discordUserId && !self) buttons.push(h("button", { class: "btn ghost", text: "Unlink Discord",
+      onclick: () => act(() => api("/admin/users/" + encodeURIComponent(u.uid) + "/unlink-discord", { method: "POST" }),
+        "Unlink Discord from " + u.uid + "? They won't be able to connect until they link Discord again (it can be a different Discord account).") }));
+    if (me.isAdmin && !u.isAdmin) buttons.push(h("button", { class: "btn ghost", text: u.isModerator ? "Remove moderator" : "Make moderator",
+      onclick: () => act(() => api("/admin/users/" + encodeURIComponent(u.uid) + "/moderator", { method: "POST", body: JSON.stringify({ isModerator: !u.isModerator }) })) }));
+
+    const groups = (u.memberships || []).length
+      ? h("div", { class: "tablewrap" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", { text: "Syncshell" }), h("th", { text: "Role" }), h("th", { text: "Joined" }))),
+          h("tbody", {}, u.memberships.map(g => h("tr", { class: "click", onclick: () => openGroup(g.gid) },
+            h("td", {}, h("div", { text: g.alias || "(no alias)", class: g.alias ? "" : "dim" }), h("div", { class: "mono dim", text: g.gid })),
+            h("td", { text: g.role }), h("td", { text: new Date(g.joinedAt).toLocaleDateString() }))))))
+      : h("div", { class: "dim", text: "Not in any syncshells." });
+
+    openDialog(u.alias || (u.discordUsername ? "@" + u.discordUsername : u.uid),
+      fields([
+        ["UID", h("span", { class: "mono", text: u.uid })],
+        ["Alias", u.alias || "—"],
+        ["Status", statusBits(u)],
+        u.isBanned ? ["Ban reason", u.banReason || "—"] : null,
+        ["Discord", discordCell(u, true)],
+        ["Online", u.online ? h("span", {}, h("span", { class: "dot" }), u.ident ? "as " + u.ident : "yes") : "no"],
+        ["Last connected", dt(u.lastSeenAt)],
+        ["Last login", dt(u.lastLoginAt)],
+        ["Created", dt(u.createdAt)],
+        ["Pairs", String(u.pairs)],
+        ["Open reports against", String(u.openReports)],
+      ]),
+      h("h3", { text: "Syncshells", style: "font-size:.9rem;margin:.2rem 0 .5rem" }), groups,
+      buttons.length ? h("div", { class: "actions" }, buttons) : null,
+      me.isAdmin && !u.isAdmin ? h("div", { class: "note", text: "Role changes take effect the next time they sign in." }) : null,
+      msg);
+  }
+
+  // =====================================================================
+  // Online
+  // =====================================================================
+  async function loadOnline() {
+    const body = $("#onlineBody");
+    try {
+      const rows = await api("/admin/online");
+      $("#onlineCount").textContent = rows.length + " connected";
+      body.replaceChildren(...(rows.length ? rows.map(u => h("tr", { class: "click", onclick: () => openUser(u.uid) },
+        h("td", {}, userCell(u.uid, u.alias)),
+        h("td", { text: u.ident || "—" }),
+        h("td", {}, discordCell(u)),
+        h("td", { title: dt(u.connectedAt), text: ago(u.connectedAt) })))
+        : [h("tr", {}, h("td", { colspan: 4, class: "empty-row", text: "Nobody is connected right now." }))]));
+    } catch (e) { if (e.status !== 401 && e.status !== 403) body.replaceChildren(h("tr", {}, h("td", { colspan: 4, class: "empty-row", text: e.message }))); }
+  }
+  $("#onlineRefresh").addEventListener("click", loadOnline);
+
+  // =====================================================================
+  // Syncshells
+  // =====================================================================
+  let gQ = "", gT = null;
+  async function loadGroups() {
+    const body = $("#groupsBody");
+    try {
+      const rows = await api("/admin/groups?q=" + encodeURIComponent(gQ));
+      body.replaceChildren(...(rows.length ? rows.map(g => h("tr", { class: "click", onclick: () => openGroup(g.gid) },
+        h("td", {}, h("div", { text: g.alias || "(no alias)", class: g.alias ? "" : "dim" }), h("div", { class: "mono dim", text: g.gid })),
+        h("td", {}, userCell(g.ownerUid, g.ownerAlias, g.ownerDiscordUsername)),
+        h("td", { class: "num", text: g.members + (g.memberLimit ? " / " + g.memberLimit : "") }),
+        h("td", { title: dt(g.createdAt), text: new Date(g.createdAt).toLocaleDateString() })))
+        : [h("tr", {}, h("td", { colspan: 4, class: "empty-row", text: "No syncshells match." }))]));
+    } catch (e) { if (e.status !== 401 && e.status !== 403) body.replaceChildren(h("tr", {}, h("td", { colspan: 4, class: "empty-row", text: e.message }))); }
+  }
+  $("#groupQ").addEventListener("input", e => { clearTimeout(gT); gT = setTimeout(() => { gQ = e.target.value.trim(); loadGroups(); }, 250); });
+  $("#groupRefresh").addEventListener("click", loadGroups);
+
+  async function openGroup(gid) {
+    openDialog("Syncshell", h("div", { class: "dim", text: "Loading…" }));
+    let g;
+    try { g = await api("/admin/groups/" + encodeURIComponent(gid)); }
+    catch (e) { openDialog("Syncshell", h("div", { class: "msg error", text: e.message })); return; }
+    const msg = h("div", { class: "msg" });
+    const del = me.isAdmin ? h("button", { class: "btn danger", text: "Delete syncshell", onclick: async () => {
+      if (!confirm("Delete " + (g.alias || g.gid) + " for all " + g.members.length + " members? This can't be undone.")) return;
+      msg.textContent = "Deleting…";
+      try { await api("/admin/groups/" + encodeURIComponent(g.gid), { method: "DELETE" }); dlg.close(); refreshCurrentList(); }
+      catch (e) { msg.className = "msg error"; msg.textContent = e.message; }
+    }}) : null;
+    openDialog(g.alias || g.gid,
+      fields([
+        ["GID", h("span", { class: "mono", text: g.gid })],
+        ["Owner", h("a", { href: "#", text: g.ownerUid, class: "mono", onclick: e => { e.preventDefault(); openUser(g.ownerUid); } })],
+        ["Members", g.members.length + (g.memberLimit ? " / " + g.memberLimit : "")],
+        ["Banned from it", String(g.bans)],
+        ["Created", dt(g.createdAt)],
+      ]),
+      h("div", { class: "tablewrap" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", { text: "Member" }), h("th", { text: "Role" }), h("th", { text: "Joined" }))),
+        h("tbody", {}, g.members.map(m => h("tr", { class: "click", onclick: () => openUser(m.uid) },
+          h("td", {}, userCell(m.uid, m.alias, m.discordUsername)), h("td", { text: m.role }), h("td", { text: new Date(m.joinedAt).toLocaleDateString() })))))),
+      del ? h("div", { class: "actions" }, del) : null, msg);
+  }
+
+  // =====================================================================
+  // Reports & audit
+  // =====================================================================
+  let showResolved = false;
+  $$("#reportsSeg button").forEach(b => b.addEventListener("click", () => {
+    showResolved = b.dataset.res === "true";
+    $$("#reportsSeg button").forEach(x => x.classList.toggle("on", x === b));
+    loadReports();
+  }));
+  async function refreshReportsBadge() {
+    try {
+      const rows = await api("/admin/reports?resolved=false&take=500");
+      const badge = $("#reportsBadge"); badge.hidden = !rows.length; badge.textContent = rows.length;
+    } catch {}
+  }
+  async function loadReports() {
+    const body = $("#reportsBody");
+    try {
+      const rows = await api("/admin/reports?resolved=" + showResolved + "&take=300");
+      body.replaceChildren(...(rows.length ? rows.map(r => h("tr", {},
+        h("td", {}, h("a", { href: "#", class: "mono", text: r.reported, onclick: e => { e.preventDefault(); openUser(r.reported); } })),
+        h("td", {}, h("a", { href: "#", class: "mono", text: r.reporter, onclick: e => { e.preventDefault(); openUser(r.reporter); } })),
+        h("td", { text: r.reason }),
+        h("td", { title: dt(r.createdAt), text: ago(r.createdAt) }),
+        h("td", {}, showResolved ? h("span", { class: "dim", text: r.resolution || "" }) :
+          h("button", { class: "btn ghost", text: "Resolve", onclick: async ev => {
+            const note = prompt("Resolution note (optional):", "");
+            if (note === null) return;
+            ev.target.disabled = true;
+            try { await api("/admin/reports/" + r.id + "/resolve", { method: "POST", body: JSON.stringify({ note: note || "resolved via dashboard" }) }); loadReports(); refreshReportsBadge(); }
+            catch { ev.target.disabled = false; }
+          }}))))
+        : [h("tr", {}, h("td", { colspan: 5, class: "empty-row", text: showResolved ? "No resolved reports." : "No open reports." }))]));
+    } catch (e) { if (e.status !== 401 && e.status !== 403) body.replaceChildren(h("tr", {}, h("td", { colspan: 5, class: "empty-row", text: e.message }))); }
+  }
+  $("#reportsRefresh").addEventListener("click", () => { loadReports(); refreshReportsBadge(); });
+
+  async function loadAudit() {
+    const body = $("#auditBody");
+    try {
+      const rows = await api("/admin/audit?take=300");
+      body.replaceChildren(...(rows.length ? rows.map(r => h("tr", {},
+        h("td", { title: dt(r.createdAt), text: ago(r.createdAt) }),
+        h("td", {}, h("a", { href: "#", class: "mono", text: r.actorUid, onclick: e => { e.preventDefault(); openUser(r.actorUid); } })),
+        h("td", { class: "mono", text: r.action }),
+        h("td", {}, r.targetUid ? h("a", { href: "#", class: "mono", text: r.targetUid, onclick: e => { e.preventDefault(); openUser(r.targetUid); } })
+                   : r.targetGid ? h("span", { class: "mono", text: r.targetGid }) : "—"),
+        h("td", { text: r.detail || "—" })))
+        : [h("tr", {}, h("td", { colspan: 5, class: "empty-row", text: "Nothing logged yet." }))]));
+    } catch (e) { if (e.status !== 401 && e.status !== 403) body.replaceChildren(h("tr", {}, h("td", { colspan: 5, class: "empty-row", text: e.message }))); }
+  }
+  $("#auditRefresh").addEventListener("click", loadAudit);
+
+  // ---------- boot ----------
+  if (getToken()) showApp(); else showLogin();
+})();
+</script>
+</body>
+</html>

@@ -11,6 +11,8 @@ public interface IPresenceTracker
     Task<bool> IsOnlineAsync(string uid);
     Task<string?> GetPrimaryConnectionAsync(string uid);
     Task<int> OnlineCountAsync();
+    /// <summary>Every UID currently online anywhere in the fleet (admin dashboard).</summary>
+    Task<IReadOnlyList<string>> OnlineUidsAsync();
 
     // Character ident — "{Name}@{HomeWorldRowId}" published by the client. Used by paired
     // clients' VisibleUserManager to match against the live in-game object table.

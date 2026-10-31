@@ -98,6 +98,11 @@ if (!string.IsNullOrWhiteSpace(redisConn))
 builder.Services.AddSingleton<IUserIdProvider, ClaimsNameIdentifierUserIdProvider>();
 
 // ---- metrics / ops ----
+// Overview tab of the admin dashboard: in-memory 24h history sampled from this process and the
+// auth/file services' /metrics (internal network only — Caddy blocks /metrics publicly).
+builder.Services.AddHttpClient(nameof(MetricsSampler), c => c.Timeout = TimeSpan.FromSeconds(5));
+builder.Services.AddSingleton<MetricsSampler>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<MetricsSampler>());
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AethernetDbContext>("postgres");
 
@@ -123,8 +128,14 @@ app.MapGet(Routes.Server.ApiInfo, (IConfiguration cfg) => new
 // Web moderation dashboard — see AdminDashboardHtml. The page itself handles its own JWT
 // login (admin/moderator role check happens server-side on every /admin/* call it makes),
 // so the shell is served anonymously, same as a normal SPA's index.html.
-app.MapGet("/admin/dashboard", (IConfiguration cfg) =>
-    Results.Content(AdminDashboardHtml.Render(cfg["Admin:AuthBaseUrl"] ?? ""), "text/html"));
+app.MapGet("/admin/dashboard", (IConfiguration cfg, HttpContext ctx) =>
+{
+    // The page holds a JWT in localStorage; keep it out of frames and off other origins' scripts.
+    ctx.Response.Headers["X-Frame-Options"] = "DENY";
+    ctx.Response.Headers["Referrer-Policy"] = "no-referrer";
+    ctx.Response.Headers["Cache-Control"]   = "no-store";
+    return Results.Content(AdminDashboardHtml.Render(cfg["Admin:AuthBaseUrl"] ?? ""), "text/html; charset=utf-8");
+});
 
 app.MapControllers();
 

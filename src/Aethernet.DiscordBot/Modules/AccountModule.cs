@@ -139,6 +139,9 @@ public sealed class AccountModule : InteractionModuleBase<SocketInteractionConte
         }
 
         user.DiscordUserId = null;
+        user.DiscordUsername = null;
+        user.DiscordDisplayName = null;
+        user.DiscordProfileUpdatedAt = null;
         await _db.SaveChangesAsync();
         await FollowupAsync(
             $"Unlinked UID `{user.Uid}` from your Discord account. That account can't connect until it's " +

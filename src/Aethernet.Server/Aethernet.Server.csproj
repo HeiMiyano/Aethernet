@@ -29,4 +29,9 @@
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The admin dashboard page — see AdminDashboard/AdminDashboardHtml.cs. -->
+    <EmbeddedResource Include="AdminDashboard\dashboard.html" LogicalName="Aethernet.Server.AdminDashboard.dashboard.html" />
+  </ItemGroup>
+
 </Project>

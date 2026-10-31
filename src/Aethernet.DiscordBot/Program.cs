@@ -33,6 +33,7 @@ builder.Services.AddSingleton(new DiscordSocketConfig
 builder.Services.AddSingleton<DiscordSocketClient>();
 builder.Services.AddSingleton(sp => new InteractionService(sp.GetRequiredService<DiscordSocketClient>()));
 builder.Services.AddHostedService<BotHostedService>();
+builder.Services.AddHostedService<DiscordProfileRefresher>();
 
 var app = builder.Build();
 await app.RunAsync();

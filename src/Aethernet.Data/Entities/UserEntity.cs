@@ -22,6 +22,20 @@ public class UserEntity
     [MaxLength(32)]
     public string? DiscordUserId { get; set; }
 
+    /// <summary>Discord username (the unique handle, e.g. "miyano") as of the last Discord sign-in
+    /// or bot refresh. Display/moderation only — never used for identity; that's
+    /// <see cref="DiscordUserId"/>. Null until first seen.</summary>
+    [MaxLength(32)]
+    public string? DiscordUsername { get; set; }
+
+    /// <summary>Discord display name (<c>global_name</c>), if the user set one.</summary>
+    [MaxLength(64)]
+    public string? DiscordDisplayName { get; set; }
+
+    /// <summary>When <see cref="DiscordUsername"/>/<see cref="DiscordDisplayName"/> were last
+    /// refreshed from Discord.</summary>
+    public DateTime? DiscordProfileUpdatedAt { get; set; }
+
     public bool IsAdmin     { get; set; }
     public bool IsModerator { get; set; }
     public bool IsBanned    { get; set; }

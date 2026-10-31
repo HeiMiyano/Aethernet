@@ -460,7 +460,18 @@ namespace Aethernet.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("DiscordDisplayName")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("DiscordProfileUpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("DiscordUserId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("DiscordUsername")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 

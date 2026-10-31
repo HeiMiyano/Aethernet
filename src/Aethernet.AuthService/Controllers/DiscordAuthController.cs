@@ -150,9 +150,14 @@ public sealed class DiscordAuthController : ControllerBase
         var existing = await _db.Users.FirstOrDefaultAsync(u => u.DiscordUserId == du.Id, ct);
         if (existing is not null)
         {
+            // Keep the moderation-facing name current, banned or not.
+            ApplyDiscordProfile(existing, du);
             if (existing.IsBanned)
+            {
+                await _db.SaveChangesAsync(ct);
                 return Fail(AuthErrorCodes.Banned, string.IsNullOrWhiteSpace(existing.BanReason)
                     ? "This account is banned." : $"This account is banned: {existing.BanReason}");
+            }
 
             // Signing in again = new PC or lost key. Issue a fresh secret and kill old sessions;
             // the previous key stops working everywhere else.
@@ -172,6 +177,9 @@ public sealed class DiscordAuthController : ControllerBase
             Uid           = uid,
             SecretKeyHash = SecretKeyHasher.Hash(key),
             DiscordUserId = du.Id,
+            DiscordUsername         = Truncate(du.Username, 32),
+            DiscordDisplayName      = Truncate(du.GlobalName, 64),
+            DiscordProfileUpdatedAt = DateTime.UtcNow,
             CreatedAt     = DateTime.UtcNow,
             LastSeenAt    = DateTime.UtcNow,
         });
@@ -200,11 +208,16 @@ public sealed class DiscordAuthController : ControllerBase
         var target = await _db.Users.FirstOrDefaultAsync(u => u.Uid == uid, ct);
         if (target is null) return Fail("not_found", "That account no longer exists.");
         if (target.DiscordUserId == du.Id)
+        {
+            ApplyDiscordProfile(target, du);
+            await _db.SaveChangesAsync(ct);
             return new DiscordPollResponseDto(DiscordPollStatus.Complete, uid, null, true, null, "Already linked.");
+        }
         if (!string.IsNullOrEmpty(target.DiscordUserId))
             return Fail(AuthErrorCodes.AlreadyLinked, "This account is already linked to a different Discord account.");
 
         target.DiscordUserId = du.Id;
+        ApplyDiscordProfile(target, du);
         try
         {
             await _db.SaveChangesAsync(ct);
@@ -248,4 +261,17 @@ public sealed class DiscordAuthController : ControllerBase
             <body><main><div class="card"><h1>{{WebUtility.HtmlEncode(title)}}</h1><p>{{bodyHtml}}</p></div></main></body></html>
             """,
     };
+
+    /// <summary>Records the Discord username/display name for the admin dashboard. Identity is
+    /// always the snowflake (<c>DiscordUserId</c>); these are display-only and refreshed on every
+    /// Discord sign-in/link (and periodically by the bot).</summary>
+    private static void ApplyDiscordProfile(UserEntity user, DiscordUser du)
+    {
+        user.DiscordUsername         = Truncate(du.Username, 32);
+        user.DiscordDisplayName      = Truncate(du.GlobalName, 64);
+        user.DiscordProfileUpdatedAt = DateTime.UtcNow;
+    }
+
+    private static string? Truncate(string? s, int max) =>
+        string.IsNullOrWhiteSpace(s) ? null : (s.Length <= max ? s : s[..max]);
 }

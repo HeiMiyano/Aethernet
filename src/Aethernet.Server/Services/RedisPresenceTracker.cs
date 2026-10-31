@@ -82,6 +82,14 @@ public sealed class RedisPresenceTracker : IPresenceTracker
         return (int)await db.SetLengthAsync(IndexKey);
     }
 
+    public async Task<IReadOnlyList<string>> OnlineUidsAsync()
+    {
+        if (_redis is null) return _local.Keys.ToList();
+        var db = _redis.GetDatabase();
+        var members = await db.SetMembersAsync(IndexKey);
+        return members.Where(m => !m.IsNullOrEmpty).Select(m => m.ToString()).ToList();
+    }
+
     public async Task SetIdentAsync(string uid, string ident)
     {
         if (_redis is null) { _localIdents[uid] = ident; return; }
