@@ -118,12 +118,30 @@ public sealed class CharacterDataApplier
                     // Penumbra requires the replacement file's extension to match the game path's
                     // extension. _cache.GetPath(hash, gamePath) hardlinks to an extensioned twin on
                     // first use so Penumbra accepts the replacement.
-                    var mapping = appearance.FileReplacements.ToDictionary(
-                        kv => kv.Key,
-                        kv => _cache.GetPath(kv.Value, kv.Key),
-                        StringComparer.Ordinal);
+                    //
+                    // Keys are normalised the way Penumbra does it (PenumbraIpc.NormalizeGamePathKey):
+                    // AddTemporaryMod rejects the ENTIRE set with InvalidGamePath if two keys collide
+                    // after its normalisation (case-insensitive, '\\' to '/', trimmed), which left the
+                    // pair fully vanilla. Senders on v0.1.19 produced exactly such collisions, so
+                    // this has to be defended on the receiving side too. First entry per path wins;
+                    // a real file replacement beats a swap for the same path; self-referential
+                    // swaps (path -> same path) are no-ops and dropped.
+                    var mapping = new Dictionary<string, string>(StringComparer.Ordinal);
+                    var collisions = 0;
+                    foreach (var (gamePath, hash) in appearance.FileReplacements)
+                    {
+                        var key = PenumbraIpc.NormalizeGamePathKey(gamePath);
+                        if (key is null || !mapping.TryAdd(key, _cache.GetPath(hash, key))) collisions++;
+                    }
                     foreach (var (src, dst) in appearance.FileSwaps)
-                        mapping[src] = dst;
+                    {
+                        var key = PenumbraIpc.NormalizeGamePathKey(src);
+                        var to  = PenumbraIpc.NormalizeGamePathKey(dst);
+                        if (key is null || to is null || key == to) continue;
+                        mapping.TryAdd(key, to);
+                    }
+                    if (collisions > 0)
+                        _log.LogInformation("  kind={Kind}: merged {N} duplicate game paths from {Uid}'s data", kind, collisions, uid);
 
                     _log.LogInformation("  kind={Kind} targetIdx={Idx} replacements={Cnt} | sample: {Sample}",
                         kind, targetIndex, mapping.Count,

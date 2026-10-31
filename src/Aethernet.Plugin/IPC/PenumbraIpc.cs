@@ -414,17 +414,47 @@ public sealed class PenumbraIpc : IDisposable
         foreach (var (gp, rel) in opt.Files)
         {
             if (string.IsNullOrEmpty(gp) || string.IsNullOrEmpty(rel)) continue;
-            yield return (NormaliseGamePath(gp),
+            var key = NormalizeGamePathKey(gp);
+            if (key is null) continue;
+            yield return (key,
                           Path.Combine(modFullDir, rel.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar)));
         }
         foreach (var (gp, target) in opt.Swaps)
         {
             if (string.IsNullOrEmpty(gp) || string.IsNullOrEmpty(target)) continue;
-            yield return (NormaliseGamePath(gp), NormaliseGamePath(target));
+            var key = NormalizeGamePathKey(gp);
+            var to  = NormalizeGamePathKey(target);
+            if (key is null || to is null) continue;
+            yield return (key, to);
         }
     }
 
-    private static string NormaliseGamePath(string p) => p.Replace('\\', '/').ToLowerInvariant();
+    /// <summary>
+    /// Normalises a game path exactly the way Penumbra keys temporary-mod redirections
+    /// (Utf8GamePath.FromString in Penumbra.String 1.7: '\' → '/', TrimStart('/'), Trim(), then
+    /// compared ASCII-case-insensitively), and lowercases ASCII so the result can be deduped with
+    /// a plain ordinal dictionary. Returns null for keys Penumbra would treat as empty or reject
+    /// (more than 2048 chars).
+    ///
+    /// Why it matters: AddTemporaryMod rejects the WHOLE redirection set with InvalidGamePath (8)
+    /// if any two keys collide after Penumbra's normalisation — one duplicate and the pair renders
+    /// completely vanilla. Every key that goes into a DTO or into AddTemporaryMod must pass
+    /// through here.
+    /// </summary>
+    public static string? NormalizeGamePathKey(string? gamePath)
+    {
+        if (string.IsNullOrEmpty(gamePath)) return null;
+        var text = gamePath.Replace('\\', '/').TrimStart('/').Trim();
+        if (text.Length == 0 || text.Length > 2048) return null;
+        return string.Create(text.Length, text, static (span, src) =>
+        {
+            for (var i = 0; i < src.Length; i++)
+            {
+                var c = src[i];
+                span[i] = c is >= 'A' and <= 'Z' ? (char)(c + 32) : c; // ASCII-only, like Penumbra
+            }
+        });
+    }
 
     /// <summary>Fallback when JSON parsing fails — keeps the old directory-walk behavior so we
     /// at least catch SOME files for mods with non-standard layouts.</summary>

@@ -93,11 +93,22 @@ public sealed class CharacterDataCollector
             {
                 var dto = new ObjectAppearanceDto { ManipulationData = per.ManipulationData };
                 int swap = 0, replace = 0, missing = 0;
-                foreach (var (gamePath, actualPath) in per.Resources)
+                foreach (var (rawGamePath, actualPath) in per.Resources)
                 {
+                    // Same normalisation Penumbra applies on the receiving end (see
+                    // PenumbraIpc.NormalizeGamePathKey) so resource-tree keys and mod-walk keys
+                    // can't end up as two entries for one path — that makes AddTemporaryMod
+                    // reject everything with InvalidGamePath.
+                    var gamePath = PenumbraIpc.NormalizeGamePathKey(rawGamePath);
+                    if (gamePath is null) continue;
                     if (!Path.IsPathRooted(actualPath))
                     {
-                        dto.FileSwaps[gamePath] = actualPath;
+                        // Unmodded loaded files come back as self-referential "swaps" (path -> same
+                        // path). They're no-ops; don't send them.
+                        var target = PenumbraIpc.NormalizeGamePathKey(actualPath);
+                        if (target is null || target == gamePath) continue;
+                        if (dto.FileReplacements.ContainsKey(gamePath)) continue;
+                        dto.FileSwaps[gamePath] = target;
                         swap++;
                         continue;
                     }
@@ -106,6 +117,7 @@ public sealed class CharacterDataCollector
                     {
                         var (hash, cachePath) = _cache.Ingest(actualPath);
                         dto.FileReplacements[gamePath] = hash;
+                        dto.FileSwaps.Remove(gamePath);
                         hashToPath[hash] = cachePath;
                         replace++;
                     }
