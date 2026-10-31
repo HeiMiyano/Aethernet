@@ -1,6 +1,6 @@
 [
 {
-  "Author": "Aethernet contributors",
+  "Author": "Hei Miyano",
   "Name": "Aethernet",
   "InternalName": "Aethernet",
   "AssemblyVersion": "0.1.21.0",
@@ -15,7 +15,7 @@
     "sync"
   ],
   "RepoUrl": "https://github.com/HeiMiyano/Aethernet",
-  "IconUrl": "",
+  "IconUrl": "https://raw.githubusercontent.com/HeiMiyano/Aethernet/main/images/icon.png",
   "DownloadLinkInstall": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.21/latest.zip",
   "DownloadLinkUpdate": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.21/latest.zip",
   "DownloadLinkTesting": "https://github.com/HeiMiyano/Aethernet/releases/download/v0.1.21/latest.zip",

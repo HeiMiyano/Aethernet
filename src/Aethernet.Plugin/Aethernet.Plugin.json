@@ -1,5 +1,5 @@
 {
-  "Author": "Aethernet contributors",
+  "Author": "Hei Miyano",
   "Name": "Aethernet",
   "InternalName": "Aethernet",
   "AssemblyVersion": "0.1.21.0",
@@ -12,6 +12,6 @@
     "sync"
   ],
   "RepoUrl": "https://github.com/HeiMiyano/Aethernet",
-  "IconUrl": "",
+  "IconUrl": "https://raw.githubusercontent.com/HeiMiyano/Aethernet/main/images/icon.png",
   "Punchline": "Mod synchronization between paired players."
 }
