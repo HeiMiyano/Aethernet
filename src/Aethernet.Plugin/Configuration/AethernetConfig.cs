@@ -37,7 +37,7 @@ public sealed class AethernetConfig : IPluginConfiguration
     public int    DataPushDebounceMs       { get; set; } = 1500;
     /// <summary>Safety-net interval (seconds) for re-collecting and pushing character data. The hash check skips no-op pushes, so this is cheap. Set to 0 to disable.</summary>
     public int    PeriodicSyncIntervalSec  { get; set; } = 30;
-    /// <summary>Enumerate every file in every enabled mod (captures animations/VFX/sounds that aren't currently loaded). Can be heavy on disks with multi-GB mod folders — disable if it causes hitching or crashes. Hash cache keeps recurring scans cheap once primed.</summary>
+    /// <summary>Scan enabled mods (respecting selected options) for animations, VFX, sounds and skeleton files, which the game only loads when they play and so can't be seen in the worn-resource scan. Gear/body files are NOT taken from this scan — only what's actually worn syncs. Hash cache keeps recurring scans cheap once primed.</summary>
     public bool   EnableModFileEnumeration { get; set; } = true;
     /// <summary>How long to silence push attempts after the hub returns rate_limited. Server's bucket refills during this window.</summary>
     public int    RateLimitBackoffSec      { get; set; } = 10;

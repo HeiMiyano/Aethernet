@@ -189,6 +189,13 @@ public sealed class PenumbraIpc : IDisposable
     ///
     /// FileSwaps in the mod data are yielded with a GAME path as ActualPath (not rooted); the
     /// collector routes those into the DTO's FileSwaps instead of hashing them.
+    ///
+    /// Only LAZY-LOADED content is yielded (see <see cref="IsLazyLoadedGamePath"/>): animations,
+    /// VFX, sounds, skeleton/physics. Gear/body/hair models, materials and textures are loaded the
+    /// moment they're worn, so GetGameObjectResourcePaths already reports exactly what the
+    /// character is wearing. Walking those here too meant uploading every enabled mod's gear —
+    /// including outfits not being worn — which was ~3.4 GB vs ~70 MB of actual animation/VFX/sound
+    /// data on a typical setup.
     /// </summary>
     public IEnumerable<(string GamePath, string ActualPath)> EnumerateActiveModFiles(int objectIndex)
     {
@@ -211,7 +218,7 @@ public sealed class PenumbraIpc : IDisposable
             enabled.Add((modDir, settings.Value.Priority, settings.Value.SelectedOptions));
         }
 
-        int fileCount = 0, emptyMods = 0;
+        int fileCount = 0, emptyMods = 0, skippedLoaded = 0;
         foreach (var mod in enabled.OrderByDescending(m => m.Priority)) // stable: ties keep list order
         {
             var fullDir = Path.Combine(modRoot, mod.Dir);
@@ -231,15 +238,41 @@ public sealed class PenumbraIpc : IDisposable
 
             foreach (var pair in yielded)
             {
+                if (!IsLazyLoadedGamePath(pair.GamePath)) { skippedLoaded++; continue; }
                 fileCount++;
                 yield return pair;
             }
         }
-        _log.LogInformation("EnumerateActiveModFiles: {Enabled} enabled mods, {Files} game files yielded ({Empty} mods contributed none)",
-            enabled.Count, fileCount, emptyMods);
-        if (enabled.Count > 0 && fileCount == 0)
+        _log.LogInformation("EnumerateActiveModFiles: {Enabled} enabled mods, {Files} animation/VFX/sound files yielded " +
+                            "({Skipped} gear/body files left to the worn-resource scan, {Empty} mods contributed none)",
+            enabled.Count, fileCount, skippedLoaded, emptyMods);
+        if (enabled.Count > 0 && fileCount == 0 && skippedLoaded == 0)
             _log.LogWarning("EnumerateActiveModFiles: 0 files from {Enabled} enabled mods. Penumbra's on-disk mod format may have changed; " +
                             "animations, sounds and VFX will NOT sync until the parser is updated.", enabled.Count);
+    }
+
+    private static readonly HashSet<string> LazyLoadedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pap", ".tmb",                      // animations + timelines (emotes, idles, actions)
+        ".avfx", ".atex",                    // visual effects + their textures
+        ".scd",                              // sounds / music
+        ".sklb", ".pbd", ".skp", ".phyb", ".eid", ".atch", // skeleton, racial deform, physics, attach points
+    };
+
+    private static readonly string[] LazyLoadedRoots = { "vfx/", "sound/", "music/" };
+
+    /// <summary>
+    /// True for game paths the game only loads on demand (when an emote/action/effect/sound plays),
+    /// which GetGameObjectResourcePaths can't see ahead of time. Everything else (worn
+    /// models/materials/textures) is left to the resource-tree scan so only what's actually being
+    /// worn gets synced.
+    /// </summary>
+    internal static bool IsLazyLoadedGamePath(string gamePath)
+    {
+        if (LazyLoadedExtensions.Contains(Path.GetExtension(gamePath))) return true;
+        foreach (var root in LazyLoadedRoots)
+            if (gamePath.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 
     private sealed record ModOption(string Name, Dictionary<string, string> Files, Dictionary<string, string> Swaps);
