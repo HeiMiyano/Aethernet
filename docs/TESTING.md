@@ -148,15 +148,9 @@ If B never redraws:
 2. On B, watch the plugin log: the `Appearances` dictionary in the inbound `CharacterDataDto` should have entries for `Minion` / `Mount` / `Pet` / `Companion` alongside `Player`.
 3. The applier creates a separate temporary-mod tag per kind (`aethernet:<uid>:Minion`, etc.) and redraws each owned actor. The minion should display the mod the same way as the player.
 
-## 10. Nameplate decorations
+## 10. Nameplates
 
-With at least one paired player visible:
-
-- Their nameplate **title line** should get a star/marker prefix (paired+visible).
-- Pairs that are online but not visible get a different marker (paired-but-not-visible).
-- Non-paired players are untouched.
-
-If nothing changes, confirm `INamePlateGui` is wired by checking the plugin log for `NameplateDecorator` activity. (Dalamud's nameplate API changed in 2024; older Dalamud builds don't have it — update Dalamud first.)
+Aethernet no longer modifies nameplates (the old marker decoration was removed because it overwrote the title slot and hid Honorific titles). With a paired player visible, their nameplate — including any Honorific title — should look exactly as it does without Aethernet.
 
 ## 11. Quiet-zone pause
 

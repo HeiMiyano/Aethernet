@@ -2,7 +2,6 @@ using Aethernet.Plugin.Configuration;
 using Aethernet.Plugin.IPC;
 using Aethernet.Plugin.Services;
 using Aethernet.Plugin.UI;
-using Dalamud.Game.Gui.NamePlate;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -32,7 +31,6 @@ public sealed class AethernetPlugin : IDalamudPlugin
         IChatGui chat,
         ICondition condition,
         INotificationManager notifications,
-        INamePlateGui nameplate,
         IGameGui gameGui)
     {
         _pi = pluginInterface;
@@ -47,7 +45,6 @@ public sealed class AethernetPlugin : IDalamudPlugin
         services.AddSingleton(chat);
         services.AddSingleton(condition);
         services.AddSingleton(notifications);
-        services.AddSingleton(nameplate);
         services.AddSingleton(gameGui);
 
         services.AddLogging(b => b.AddProvider(new DalamudLoggerProvider(pluginLog)));
@@ -77,7 +74,6 @@ public sealed class AethernetPlugin : IDalamudPlugin
         services.AddSingleton<VisibleUserManager>();
         services.AddSingleton<ZoneObserver>();
         services.AddSingleton<SyncOrchestrator>();
-        services.AddSingleton<NameplateDecorator>();
 
         // ---- UI ----
         services.AddSingleton<MainWindow>();
@@ -103,7 +99,6 @@ public sealed class AethernetPlugin : IDalamudPlugin
         _services.GetRequiredService<VisibleUserManager>();
         _services.GetRequiredService<ZoneObserver>();
         _services.GetRequiredService<SyncOrchestrator>();
-        _services.GetRequiredService<NameplateDecorator>();
 
         _ = _services.GetRequiredService<HubConnectionService>().StartAsync();
     }
