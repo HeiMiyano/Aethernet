@@ -48,12 +48,30 @@ public sealed class CharacterDataApplier
         _framework = framework; _log = log;
 
         _visible.PlayerBecameInvisible += OnInvisible;
+        _visible.PlayerBecameVisible   += OnVisible;
+    }
+
+    // Latest payload per pair. Needed because Penumbra collections (deleted in OnInvisible) and
+    // IPC-assigned state such as Honorific titles are dropped when a player leaves view, and the
+    // sender won't resend unchanged data. Re-applied from here when the player becomes visible.
+    private readonly ConcurrentDictionary<string, OnlineUserCharaDataMessageDto> _lastReceived = new(StringComparer.Ordinal);
+
+    private void OnVisible(VisibleEntry entry)
+    {
+        if (!_lastReceived.TryGetValue(entry.Uid, out var msg)) return;
+        _log.LogInformation("{Uid} became visible; re-applying last received data (dataVersion={Ver})", entry.Uid, msg.CharacterData.DataVersion);
+        _ = Task.Run(async () =>
+        {
+            try { await HandleAsync(msg, CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception ex) { _log.LogWarning(ex, "re-apply on visible failed for {Uid}", entry.Uid); }
+        });
     }
 
     public async Task HandleAsync(OnlineUserCharaDataMessageDto msg, CancellationToken ct)
     {
         var uid  = msg.User.UID;
         var data = msg.CharacterData;
+        _lastReceived.AddOrUpdate(uid, msg, (_, old) => old.CharacterData.DataVersion <= data.DataVersion ? msg : old);
 
         if (_lastApplied.TryGetValue(uid, out var lastVer) && lastVer >= data.DataVersion) return;
         if (!_pairs.TryGet(uid, out var pair)) { _log.LogDebug("ignoring data from unpaired {Uid}", uid); return; }
@@ -164,7 +182,12 @@ public sealed class CharacterDataApplier
                     if (data.CustomizePlusData is not null) _customize.ApplyProfile(visible.ObjectIndex, data.CustomizePlusData);
                     else _customize.RemoveProfile(visible.ObjectIndex);
                 }
-                if (data.HonorificTitle    is not null && _honorific.IsAvailable) _honorific.ApplyTitle(visible.ObjectIndex, data.HonorificTitle);
+                if (data.HonorificTitle is not null)
+                {
+                    if (_honorific.IsAvailable) _honorific.ApplyTitle(visible.ObjectIndex, data.HonorificTitle);
+                    else _log.LogInformation("Honorific title from {Uid} skipped: Honorific IPC unavailable", uid);
+                }
+                else _log.LogInformation("No Honorific title in data from {Uid} (sender has none, sender's build can't read it, or pair perms block it)", uid);
                 if (data.HeelsOffset       is not null && _heels.IsAvailable)     _heels.RegisterOffset(visible.ObjectIndex, data.HeelsOffset);
                 if (data.MoodlesData       is not null && _moodles.IsAvailable)   _moodles.ApplyStatus(visible.Address, data.MoodlesData);
                 if (data.PetNamesData      is not null && _petnames.IsAvailable)  _petnames.ApplyNames(visible.Ident, data.PetNamesData);
